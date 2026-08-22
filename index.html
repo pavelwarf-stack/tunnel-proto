@@ -1,0 +1,3009 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>РКН против ВПН — прототип v2</title>
+<!--
+  ПРОТОТИП v2 · инвестор-демо 20.08 · рескин по Figma Миши (20.08 вечер)
+  Один файл. Внешние запросы: только шрифт Unbounded (Google Fonts) + ассеты assets/figma/.
+  Работает с file:// и через http.server (класть рядом с папкой assets/).
+  ЦВЕТА ЛАГЕРЕЙ (канон 20.08): РКН — синий #1B72ED, ВПН — красный #FF0F4B. Валюта — байты.
+
+  ГДЕ ЧТО КРУТИТЬ (весь контент — три точки, разметку трогать не надо):
+    1) CSS-переменные --rkn / --vpn в :root  — палитры лагерей (единственный источник цвета);
+    2) const ART   — весь арт (эмодзи/SVG-строки/<img src="assets/figma/...">);
+    3) const CONFIG — ВСЁ остальное: пулы карт, экономика, тексты воронки,
+       стор, онбординг, промокод, задания, война, топ, обучение (tutorial),
+       мини-игры (minigames: взлом шифра + обход капчи играбельны), тосты.
+  Рендер целиком генерится из ART+CONFIG при старте.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600;700;800;900&family=Geist:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070710; --panel:rgba(255,255,255,.05); --card:rgba(255,255,255,.04); --card2:rgba(255,255,255,.08);
+  --text:#fff; --muted:rgba(255,255,255,.6); --muted2:#8A90B2; --line:rgba(255,255,255,.1);
+  /* ПАЛИТРЫ ЛАГЕРЕЙ — точка рескина. РКН = синий, ВПН = красный (токены Figma) */
+  --rkn:#1B72ED; --rkn2:#5EA0FF; --rkndim:rgba(27,114,237,.15);
+  --rknG:linear-gradient(180deg,#1B72ED,#0053C8);
+  --vpn:#FF0F4B; --vpn2:#FF5B82; --vpndim:rgba(255,15,75,.15);
+  --vpnG:linear-gradient(180deg,#FF0F4B,#99092D);
+  --gold:#FFD700; --ios:#0a84ff; --brand:#7c5cff; --brand2:#cfc4ff; --branddim:#191430;
+  /* светлая кромка CTA (аудит-2, A§4/B1/B9/C-1): белый градиент рисуется ПОВЕРХ заливки
+     кнопки (подложка тем же филом в border-box), иначе полупрозрачный белый пачкается
+     о тёмный фон страницы → грязно-серый ободок. Форма — по пробам рендеров Миши:
+     сверху ярче и гаснет к низу + подсвеченные бока по всей высоте */
+  --edgeV:linear-gradient(180deg,rgba(255,255,255,.25),rgba(255,255,255,0) 60%);
+  --edgeH:linear-gradient(90deg,rgba(255,255,255,.35),rgba(255,255,255,0) 50%,rgba(255,255,255,.35));
+  --f:'Unbounded',-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  /* СЦЕНА (волна 19): всё приложение живёт в кадре 390×844 дизайн-пикселей (#stage),
+     который целиком масштабируется под реальный экран (min по ширине/высоте),
+     центрируется, поля — летербокс #070710. Композиция пиксель-в-пиксель на любом
+     айфоне (375×667…430×932); на десктопе min по высоте даёт ту же «раму телефона»
+     ≈ высота × 0.462, что и раньше. --colw оставлен = ширине сцены: на него завязаны
+     max-width старых слоёв, внутри сцены это просто «во всю ширину». */
+  --colw:390px;
+  --sc:1;   /* безразмерный скейл сцены — считает fitStage() в JS (scale() не ест length) */
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+  font-family:var(--f);height:100%;overflow:hidden;
+  overscroll-behavior:none;user-select:none;-webkit-user-select:none}
+/* сцена: transform делает #stage containing block'ом для ВСЕХ position:fixed
+   потомков (шиты/нав/коуч/оверлеи) — они автоматически живут в дизайн-координатах
+   390×844 и клипятся кадром сцены. Скролл контента — внутри #appscroll (раньше body). */
+#stage{position:fixed;width:390px;height:844px;overflow:hidden;background:var(--bg);
+  left:calc((100vw - 390px * var(--sc)) / 2);
+  top:calc((100dvh - 844px * var(--sc)) / 2);
+  transform:scale(var(--sc));transform-origin:0 0}
+#appscroll{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+#appscroll::-webkit-scrollbar{display:none}
+body[data-side="rkn"]{--acc:var(--rkn);--acc2:var(--rkn2);--accdim:var(--rkndim);--accG:var(--rknG);--accRGB:27,114,237}
+body[data-side="vpn"]{--acc:var(--vpn);--acc2:var(--vpn2);--accdim:var(--vpndim);--accG:var(--vpnG);--accRGB:255,15,75}
+button{font-family:inherit;cursor:pointer}
+h3.sect{font:800 16px var(--f);margin:18px 0 10px}
+img{-webkit-user-drag:none}
+/* базовые атомы дизайна: панель / бейдж / главная кнопка (токены Figma) */
+.badge{display:inline-block;background:rgba(255,255,255,.1);border-radius:6px;
+  padding:4px 8px;font:700 12px var(--f);color:#fff}
+.btnp{background:linear-gradient(135deg,#3380FF,#1C7BFF) padding-box,
+  var(--edgeV) border-box,var(--edgeH) border-box,
+  linear-gradient(135deg,#3380FF,#1C7BFF) border-box;
+  border:2px solid transparent;border-radius:20px;color:#fff;
+  font:700 16px var(--f);text-transform:uppercase;letter-spacing:.02em;
+  box-shadow:0 4px 0 #207BFF,0 -4px 0 #207BFF,inset 0 9px 6.5px rgba(255,255,255,.25)}
+.btnp:active{transform:translateY(2px);box-shadow:0 2px 0 #207BFF,0 -2px 0 #207BFF,inset 0 9px 6.5px rgba(255,255,255,.25)}
+.btnp.sm{border-radius:12px;font-size:12px;text-transform:none;
+  box-shadow:0 1px 0 #207BFF,0 -1px 0 #207BFF,inset 0 4px 3px rgba(255,255,255,.25)}
+/* зелёный вариант CTA — контур приложения ВПН: в фреймах подарка (1969/16665)
+   кнопки зелёные под фирменный цвет «ПОДКЛЮЧЁН» (аудит 21.08) */
+.btng{background:linear-gradient(135deg,#10B981,#06A671) padding-box,
+  var(--edgeV) border-box,var(--edgeH) border-box,
+  linear-gradient(135deg,#10B981,#06A671) border-box;
+  border:2px solid transparent;border-radius:20px;color:#fff;
+  font:700 16px var(--f);text-transform:uppercase;letter-spacing:.02em;
+  box-shadow:0 4px 0 #0A9D6C,0 -4px 0 #0A9D6C,inset 0 9px 6.5px rgba(255,255,255,.25)}
+.btng:active{transform:translateY(2px);box-shadow:0 2px 0 #0A9D6C,0 -2px 0 #0A9D6C,inset 0 9px 6.5px rgba(255,255,255,.25)}
+.btng.sm{border-radius:12px;font-size:12px;text-transform:none;
+  box-shadow:0 1px 0 #0A9D6C,0 -1px 0 #0A9D6C,inset 0 4px 3px rgba(255,255,255,.25)}
+
+/* ---------- шапка: профиль + пилюля валюты ---------- */
+header{padding:14px 16px 8px;position:sticky;top:0;z-index:30;
+  background:linear-gradient(180deg,var(--bg) 75%,transparent)}
+.statusrow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.profile{display:flex;align-items:center;gap:10px;cursor:pointer;min-width:0}
+.profile .pava{width:40px;height:40px;border-radius:50%;border:2px solid var(--acc);
+  overflow:hidden;flex-shrink:0;display:flex}
+.profile .pava img,.profile .pava svg{width:100%;height:100%;object-fit:cover}
+.profile .pava span{font-size:24px;margin:auto}
+.profile .pn{font:700 14px var(--f);white-space:nowrap}
+.profile .pt{font:600 12px var(--f);color:var(--acc);white-space:nowrap}
+.curpill{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.1);
+  border-radius:20px;padding:9px 14px}
+.curpill .chipIc{width:18px;height:18px}
+.curpill b{font:700 12px var(--f)}
+.chipIc{display:inline-flex;width:15px;height:15px;vertical-align:-2px}
+.chipIc svg,.chipIc img{width:100%;height:100%}
+
+/* ---------- вьюхи и навигация ---------- */
+main{padding-bottom:110px}
+.view{display:none;padding:0 16px}
+.view.on{display:block}
+nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:var(--colw);
+  height:80px;display:flex;gap:2px;padding:8px 6px calc(8px + env(safe-area-inset-bottom));
+  border-radius:24px 24px 0 0;z-index:30;
+  background:linear-gradient(135deg,rgba(255,255,255,.06),rgba(7,7,16,.97) 55%),#070710;
+  box-shadow:0 -2px 0 var(--acc),inset 0 1px 0 rgba(255,255,255,.08)}
+nav button{flex:1;min-width:0;border:0;background:transparent;color:var(--muted2);
+  font:500 11px var(--f);padding:6px 0;border-radius:14px;white-space:nowrap;
+  display:flex;flex-direction:column;align-items:center;gap:5px}
+nav button .nic{width:22px;height:22px;display:flex;color:inherit}
+nav button .nic svg,nav button .nic img{width:100%;height:100%}
+nav button.on{color:var(--acc);font-weight:700}
+nav button.on .nic{filter:drop-shadow(0 0 6px rgba(var(--accRGB),.6))}
+
+/* ---------- выбор лагеря (Figma волна 7: 108:20094 нейтраль / 103:16236 ВПН / 103:16378 РКН, кадр 390×844) ---------- */
+.campsel{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);
+  background:var(--bg);z-index:100;overflow:hidden;text-align:center}
+/* нижняя виньетка (Figma rect y=320, radius 32, layer-blur): нейтраль — белая→чёрная,
+   при выборе тонируется лагерем; клипится campsel'ом — за колонку не выходит */
+.csbg{position:absolute;left:-24px;right:-24px;top:320px;bottom:-24px;border-radius:32px 32px 0 0;
+  pointer-events:none;filter:blur(5.15px);
+  background:linear-gradient(180deg,rgba(255,255,255,.01),rgba(191,191,191,.26) 25%,rgba(128,128,128,.5) 50%,rgba(64,64,64,.75) 75%,#000)}
+.campsel.selvpn .csbg{filter:blur(10px);
+  background:linear-gradient(180deg,rgba(255,69,69,.01),rgba(191,52,52,.26) 25%,rgba(128,35,35,.5) 50%,rgba(64,17,17,.75) 75%,#000)}
+.campsel.selrkn .csbg{filter:blur(10px);
+  background:linear-gradient(180deg,rgba(27,114,237,.01),rgba(20,86,178,.26) 25%,rgba(14,57,119,.5) 50%,rgba(7,29,59,.75) 75%,#000)}
+.csHead{position:absolute;top:81px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:12px}
+.csHead h1{margin:0;font:900 28px/1.25 var(--f);color:#fff}
+.csHead p.sub{margin:0;width:344px;max-width:calc(100% - 32px);font:400 14px/1.5 var(--f);color:rgba(255,255,255,.6)}
+/* сцена карточек: карты «уходят» за края экрана (Figma: ВПН x=-171 w=341, РКН x=220 w=327), VS по центру */
+.pick{position:absolute;top:285px;left:0;right:0;height:241px}
+.pick .vs{position:absolute;top:115px;left:50%;transform:translateX(-50%);font:900 16px/1.25 var(--f);color:#fff}
+.pcard{position:absolute;top:0;height:241px;border-radius:24px;cursor:pointer;
+  background:var(--card);transition:transform .15s}
+.pcard:active{transform:scale(.97)}
+/* рамка — кольцо ::before (mask-composite), чтобы градиент лагеря красил ТОЛЬКО обводку, не заливку */
+.pcard::before{content:'';position:absolute;inset:0;border-radius:24px;padding:2px;pointer-events:none;
+  background:rgba(255,255,255,.1);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude}
+.pcard[data-c="vpn"]{right:calc(50% + 25px);width:341px;top:1px}
+.pcard[data-c="rkn"]{left:calc(50% + 25px);width:327px}
+/* выбранная карта: кольцо 4px градиентом лагеря (Figma; свечения нет — виньетку красит .csbg) */
+.pcard.sel::before{padding:4px}
+.pcard[data-c="vpn"].sel::before{background:var(--vpnG)}
+.pcard[data-c="rkn"].sel::before{background:var(--rknG)}
+/* персонажи: нейтральный и «выбранный» варианты оба в DOM, .sel переключает; размеры/офсеты — точные из Figma */
+.pcard .chr{position:absolute;pointer-events:none}
+.pcard .chr img{width:100%;height:100%;display:block}
+.pcard .chr.selc{display:none}
+.pcard.sel .chr.selc{display:block}
+.pcard.sel .chr.neu{display:none}
+.pcard[data-c="vpn"] .chr.neu{right:0;top:-45px;width:163px;height:160px}
+.pcard[data-c="vpn"] .chr.selc{right:2px;top:-43px;width:157px;height:154px}
+.pcard[data-c="rkn"] .chr.neu{left:11px;top:-44px;width:155px;height:158px}
+.pcard[data-c="rkn"] .chr.selc{left:16px;top:-42px;width:140px;height:151px}
+/* текст-блок центрирован в ВИДИМОЙ части карты (Figma: 122px, отступ 26 от «внутреннего» края, y=142) */
+.pcard .tb{position:absolute;top:142px;width:122px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.pcard[data-c="vpn"] .tb{right:26px}
+.pcard[data-c="rkn"] .tb{left:26px}
+.pcard .tb b{font:800 32px/1.25 var(--f)}
+.pcard[data-c="rkn"] .tb b{color:var(--rkn)} .pcard[data-c="vpn"] .tb b{color:var(--vpn)}
+.pcard .camp-badge{background:rgba(255,255,255,.1);border-radius:6px;padding:4px 6px;font:700 12px/1.25 var(--f);color:#fff}
+/* инфо-пилюля (Figma: 359×65, y=555, radius 20) */
+.csinfo{position:absolute;top:555px;left:15px;right:16px;height:65px;display:flex;gap:8px;align-items:center;
+  text-align:left;background:rgba(255,255,255,.1);border-radius:20px;padding:10px 16px}
+.csinfo .ai{width:24px;height:24px;flex-shrink:0;display:flex}
+.csinfo .ai img,.csinfo .ai svg{width:100%;height:100%}
+.csinfo div{font:400 12px/21px var(--f);color:#fff}
+/* CTA «ПРОДОЛЖИТЬ» — в цвет выбранного лагеря (Figma modal-btn 358×70, отступ снизу 40) */
+.cbtn{position:absolute;left:16px;right:16px;bottom:40px;height:70px;border-radius:20px;
+  border:2px solid transparent;color:#fff;font:700 16px var(--f);text-transform:uppercase;
+  opacity:0;pointer-events:none;transform:translateY(8px);transition:.2s}
+.cbtn.show{opacity:1;pointer-events:auto;transform:none}
+.cbtn.show:active{transform:translateY(2px)}
+.campsel.selvpn .cbtn{background:linear-gradient(135deg,#FF0F4B,#D40438) padding-box,
+  var(--edgeV) border-box,var(--edgeH) border-box,
+  linear-gradient(135deg,#FF0F4B,#D40438) border-box;
+  box-shadow:0 4px 0 #FF0F4B,0 -4px 0 #FF0F4B,inset 0 9px 6.5px rgba(255,255,255,.25)}
+.campsel.selrkn .cbtn{background:linear-gradient(135deg,#3380FF,#1C7BFF) padding-box,
+  var(--edgeV) border-box,var(--edgeH) border-box,
+  linear-gradient(135deg,#3380FF,#1C7BFF) border-box;
+  box-shadow:0 4px 0 #207BFF,0 -4px 0 #207BFF,inset 0 9px 6.5px rgba(255,255,255,.25)}
+
+/* ---------- ШТАБ (Figma: главный экран-тапалка) ---------- */
+.tapwrap{display:flex;flex-direction:column;align-items:center;padding-top:16px}  /* фрейм 2010: зазор от шапки 24 → 16 (волна 20: место под баннер игр) */
+/* карточка «БИТВА ЗА СЕТЬ» */
+.battle{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  padding:12px 14px;backdrop-filter:blur(8px)}
+.battle .bhead{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+.battle .bhead .bt{font:900 12px var(--f);color:#5F5F80;letter-spacing:.06em;padding-top:2px}
+/* штаб (фрейм 2010, вердикт Павла 22.08 аудит-2 п.1): титул ДВЕ крупные строки по центру
+   «БИТВА / ЗА СЕТЬ» (кегль 13/15 по промеру рефа, cap 18@2x), блок вертикально отцентрован
+   против процентов. На экране Битвы реюз того же компонента остаётся ОДНОЙ малой строкой
+   (так и у Миши во фрейме войны) — двухстрочный стиль скоупится классом .bt2 */
+.battle .bhead .bt2{font:900 13px/15px var(--f);text-align:center;letter-spacing:.08em;
+  padding-top:0;align-self:center}
+.battle .bhead .kb b{color:var(--rkn)} .battle .bhead .kv b{color:var(--vpn)}
+.battle .bhead b{display:block;font:900 14px var(--f)}
+.battle .bhead span{font:400 12px var(--f);color:var(--muted)}
+.battle .bhead .kv{text-align:right}
+.battle .tug{height:16px;border-radius:100px;overflow:hidden;display:flex}
+.battle .tug .b{background:linear-gradient(90deg,#1B72ED,#0F4187)}
+.battle .tug .r{background:linear-gradient(90deg,#FF0F4B,#99092D);flex:1}
+.battle .brow{display:flex;justify-content:space-between;align-items:center;margin-top:9px;
+  font:400 12px var(--f);color:var(--muted)}
+.battle .brow b{font:700 12px var(--f);color:#fff}
+.battle .brow .tmr{color:var(--gold);font-weight:700}
+/* промо-баннер события на штабе — дизайн Миши (фрейм 2010 = 164:13240): панель 68px
+   #14141C r16, оранжевый бейдж «Событие», имя события 14px, вырезной арт справа
+   в клипе (у ВПН — Дугин с лазерами; крой фила: right-кроп 67.8% ширины листа),
+   синяя кнопка-стрелка 40×24 = мини-.btnp; тап по всей панели = ивент-шит */
+.evpromo{position:relative;display:block;width:100%;height:68px;border-radius:16px;
+  background:#14141C;margin-top:8px;cursor:pointer;overflow:hidden}
+.evpromo .epArt{position:absolute;top:-23px;right:-86px;width:272px;height:239px;
+  overflow:hidden;transform:rotate(.2deg);pointer-events:none}
+.evpromo .epArt img{display:block;width:147.4%;height:100%;margin:7px 0 0 -40.4%}
+.evpromo .epArt.cover{top:0;right:0;width:186px;height:68px;transform:none;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 45%);
+  mask-image:linear-gradient(90deg,transparent,#000 45%)}
+.evpromo .epArt.cover img{width:100%;height:100%;margin:0;object-fit:cover}
+.evpromo .epBadge{position:absolute;left:16px;top:13px;padding:2px 6px;border-radius:6px;
+  background:linear-gradient(90deg,#FC8319,#CA6B18);font:700 10px/1.24 var(--f);color:#fff}
+.evpromo .epTitle{position:absolute;left:16px;top:37px;font:700 14px/1.24 var(--f);color:#fff;
+  max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.evpromo .epGo{position:absolute;right:12px;top:20px;width:40px;height:24px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;border:1px solid transparent;
+  background:linear-gradient(135deg,#3380FF,#1C7BFF) padding-box,
+  var(--edgeV) border-box,var(--edgeH) border-box,
+  linear-gradient(135deg,#3380FF,#1C7BFF) border-box;
+  box-shadow:0 1px 0 #207BFF,0 -1px 0 #207BFF,inset 0 9px 6.5px rgba(255,255,255,.25)}
+.evpromo .epGo svg{display:block}
+/* баннер мини-игр на штабе (волна 20, слово Павла 22.08 «игры уберём снизу — тесно»):
+   та же панель, что событие (68px #14141C r16), бейдж золотой для отличимости,
+   арт справа — реюз тайла игры с фейд-маской (.epArt.cover) */
+.gamespromo{margin-top:8px}
+.gamespromo .epBadge{background:linear-gradient(90deg,#FFD700,#D9A400);color:#070710}
+.gamespromo .epArt.cover img{object-position:center 30%}
+/* шапка экрана «Игры»: кнопка «назад в штаб» (в навигации таба больше нет) */
+.ghead{display:flex;align-items:center;gap:10px}
+.gback{width:32px;height:32px;flex:none;border-radius:10px;border:1px solid var(--line);
+  background:var(--panel);color:#fff;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;padding:0}
+
+/* объект тапа (Figma волна 9: персонаж команды 213×261 + 3 концентрических кольца 4px
+   в цвет команды, альфы .05/.07/.10 изнутри наружу, свечение командным цветом) */
+.tapzone{width:285px;height:285px;border-radius:50%;   /* фрейм 2010: 285px */
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .06s ease;position:relative;margin-top:24px;font-size:96px;overflow:visible}  /* фрейм 2010: зазор от баннера 61 → 24 (волна 20: второй баннер; внешнее кольцо выступает на 23px — не наезжает) */
+.tapzone::before,.tapzone::after{content:''}
+.tapzone::before,.tapzone::after,.tapzone .ring3{position:absolute;left:50%;top:50%;
+  transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
+  box-shadow:0 0 28px rgba(var(--accRGB),.31),0 0 85px rgba(var(--accRGB),.15)}
+.tapzone::before{width:83.6%;height:83.6%;border:4px solid rgba(var(--accRGB),.05)}   /* 238/284.7 */
+.tapzone::after{width:99.8%;height:99.8%;border:4px solid rgba(var(--accRGB),.07)}    /* 284/284.7 */
+.tapzone .ring3{width:116.4%;height:116.4%;border:4px solid rgba(var(--accRGB),.1)}   /* 331/284.7 */
+.tapzone:active{transform:scale(.965)}
+.tapzone #tapArt{display:flex;width:100%;height:100%;align-items:center;justify-content:center}
+.tapzone #tapArt img{width:74.8%;height:91.7%;object-fit:contain;opacity:.9;pointer-events:none;
+  margin-top:-4%}   /* 213×261 в контейнере 284.7, y10 из фрейма */
+.taphint{margin-top:6px;color:var(--muted);font:400 12px var(--f);text-align:center}
+.taphint b{color:var(--acc2)}
+.float{position:absolute;font:900 16px var(--f);color:#fff;pointer-events:none;
+  background:rgba(var(--accRGB),.2);border:1px solid rgba(255,255,255,.2);border-radius:9.5px;
+  padding:4px 9px;box-shadow:0 0 14px rgba(var(--accRGB),.45);
+  animation:fl 1s ease-out forwards;z-index:20;white-space:nowrap}
+@keyframes fl{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-90px)}}
+/* энергия */
+.energy{width:350px;max-width:100%;margin-top:10px}  /* фрейм 2010: полоса 350px; зазор 18 → 10 (волна 20) */
+.energy .bar{height:10px;border-radius:100px;background:rgba(255,255,255,.1);overflow:hidden;
+  box-shadow:0 0 12px rgba(var(--accRGB),.25)}
+.energy .bar i{display:block;height:100%;border-radius:100px;transition:width .2s;
+  background:linear-gradient(90deg,rgba(255,255,255,.5),#fff);
+  box-shadow:0 0 10px rgba(255,255,255,.6)}
+.energy .row{display:flex;justify-content:center;gap:5px;align-items:baseline;
+  font:400 13px var(--f);margin-top:8px}
+.energy .row .l{color:#fff}
+.energy .row b{color:#fff;font:800 14px var(--f)}
+.energy .row .mx{color:#9A9AB6;font:600 13px var(--f)}
+/* ---------- ИГРЫ — свой таб (Figma, волна 6): тизер «СКОРО» + сетка 2×3 ---------- */
+/* тизер «СКОРО» — по фрейму мини-игр (90:7149): жёлтый заголовок #FFD700 без панели-коробки
+   (коробка была отсебятиной вёрстки — аудит 21.08) */
+.teaser{margin-bottom:16px}
+/* кегли тизера и меток — по фрейму 90:7149 (аудит-2 C2: наши 16/14/13 были крупнее,
+   «Перехват пакетов» ломался в 2 строки и ряды плиток разъезжались) */
+.teaser b{display:block;font:800 14px var(--f);color:#FFD700;text-transform:uppercase;
+  letter-spacing:.02em;margin-bottom:8px}
+.teaser p{margin:0;font:400 12px/1.5 var(--f);color:var(--muted)}
+.ggrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.gtile{position:relative;background:var(--panel);border-radius:16px;padding:12px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:10px}
+.gtile .gi{width:100%;max-width:125px;border-radius:16px;overflow:hidden;display:flex}
+.gtile .gi img{width:100%;height:auto;display:block}
+.gtile b{font:700 12px var(--f);letter-spacing:-.02em;text-align:center}
+.gtile .soon{position:absolute;top:8px;right:8px;background:#3380FF;color:#fff;
+  border-radius:8px;padding:3px 7px;font:900 8px var(--f);letter-spacing:.05em}
+.gtile.play{border:1px solid var(--accdim)}
+.gtile.wob{animation:wob .45s ease}
+/* бейдж шифра (волна 21): «×N MM:SS» при бусте дохода, «перезарядка MM:SS» при кулдауне */
+.gtile .gbadge{position:absolute;top:8px;right:8px;background:#2e9e5b;color:#fff;
+  border-radius:8px;padding:3px 7px;font:800 9px var(--f);letter-spacing:.03em;font-variant-numeric:tabular-nums}
+.gtile .gbadge.cd{background:rgba(255,255,255,.14);color:var(--muted)}
+
+/* ---------- КАРТЫ (Figma: «Карты улучшений») ---------- */
+.cardshead{font:900 20px var(--f);margin:6px 0 12px}
+.income{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.1);
+  border:1px solid #23273F;border-radius:12px;padding:6px 14px;margin-bottom:20px}  /* фрейм: пилюля 27pt, до имбы 20 (аудит-2 B20/B21) */
+.income .lbl{font:700 10px var(--f);color:#9A9AB6;letter-spacing:.08em}
+.income b{font:700 14px var(--f)}
+.income .ph{color:rgba(255,255,255,.5);font:600 13px var(--f)}
+.income .x2{margin-left:auto;color:var(--acc2);font:700 11px var(--f)}
+.codechip{display:none;margin:0 0 12px;width:100%;border:1.5px dashed var(--acc);background:var(--accdim);
+  color:#fff;border-radius:14px;padding:12px;font:700 13px var(--f)}
+.codechip.show{display:block}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 12px;margin-top:2px}  /* ряды 16 по фрейму (аудит-2 B21) */
+.gcard{background:transparent;border:1px solid var(--line);border-radius:16px;   /* ячейка прозрачная, карту рисует рамка (аудит-2 B17) */
+  position:relative;overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
+.gcard.wob{animation:wob .45s ease}
+@keyframes wob{0%{transform:rotate(0)}25%{transform:rotate(-2.2deg) scale(1.02)}55%{transform:rotate(1.8deg)}100%{transform:rotate(0)}}
+/* картинка-полоса сверху: img cover или эмодзи на тёмной подложке */
+.gcard .band{height:100px;background:linear-gradient(160deg,#101024,#1a1a30);position:relative;
+  display:flex;align-items:center;justify-content:center;font-size:44px;
+  display:flex;align-items:center;justify-content:center;font-size:44px;flex-shrink:0}
+.gcard .band img{width:100%;height:100%;object-fit:cover;display:block}
+/* строка бейджей на тумбе: Ур.N чёрная пилюля с БЕЛЫМ жирным текстом покрупнее
+   (вердикт Павла 22.08 аудит-2 п.2, промер рефа cards-vpn: шрифт ≈13, пилюля ≈24px);
+   метка ×2 — сразу СПРАВА от уровня; ЛЕГЕНДАРНАЯ — у правого края */
+.gcard .thh{position:absolute;top:8px;left:8px;right:8px;display:flex;align-items:flex-start;
+  gap:14px;z-index:2;pointer-events:none}
+.gcard .bLv{background:#000;color:#fff;border:1px solid rgba(255,255,255,.25);
+  font:800 13px var(--f);border-radius:9px;padding:3px 9px;flex-shrink:0}
+.gcard .bLeg{margin-left:auto;background:#3380FF;color:#fff;
+  font:700 10px var(--f);border-radius:6px;padding:2px 6px;
+  box-shadow:0 0 24px rgba(51,128,255,.31),inset 0 1px 2px rgba(255,255,255,.1)}
+.gcard .gbody{padding:12px;display:flex;flex-direction:column;gap:8px;flex:1}
+.gcard .nm{font:700 14px/1.3 var(--f)}
+/* сетка 2xN — метрики карточки из фрейма 108:19009: имя 13/16 с резервом на 2 строки
+   (имя y12 -> статы y53), доход 12px c чипом 12, кнопка h32 прижата к низу */
+.gcard:not(.imba) .nm{font:700 13px/16px var(--f);min-height:32px}
+.gcard .val{display:flex;gap:4px;align-items:center;font:700 12px var(--f)}
+.gcard .val .chipIc{width:12px;height:12px}
+.gcard .val .ph{color:rgba(255,255,255,.5);font-weight:700}
+.gcard .note{font:400 10px/1.4 var(--f);color:var(--muted)}
+.gcard.imba .note{color:#fff;margin-top:-4px}
+.gcard .buyb{margin-top:auto;display:flex;gap:4px;align-items:center;justify-content:center;
+  height:32px;padding:0 8px;width:100%;color:#fff}
+.gcard .own{margin-top:auto;text-align:center;font:700 12px var(--f);color:var(--acc2);
+  background:rgba(255,255,255,.06);border-radius:12px;padding:10px 8px}
+.gcard .lv{color:var(--muted)}
+.gcard.poor .buyb{opacity:.4}
+/* фейк-запрос на сервер при прокачке (правка Саши 21.08, как в Хомяке): кнопка → лоадер */
+/* лоадер «запрос на сервер» — белая точка из фрейма Миши 162:12839 (Ø19 в кнопке 32px,
+   Ø40 в кнопке 70px), мягкое свечение + пульс */
+.ldr{width:19px;height:19px;border-radius:50%;background:#fff;display:inline-block;
+  box-shadow:0 0 7px rgba(255,255,255,.8);animation:ldrPulse .8s ease-in-out infinite}
+.cta70 .ldr{width:40px;height:40px;box-shadow:0 0 14px rgba(255,255,255,.8)}
+@keyframes ldrPulse{0%,100%{transform:scale(.78);opacity:.75}50%{transform:scale(1);opacity:1}}
+button.pend{pointer-events:none;opacity:.85}
+/* лок цепочки — подача Миши (волна 13, фрейм 148:10890): карта НЕ гасится и без
+   бейджа уровня, кнопка = синяя на 40% с одним замком (без цены) */
+.gcard.chained .bLv{display:none}
+.gcard.chained .buyb{opacity:.4}
+.gcard .buyb .lkic{display:flex;width:20px;height:20px;opacity:.5}
+.gcard .buyb .lkic img{width:100%;height:100%}
+.gcard .flash{position:absolute;inset:0;background:var(--accdim);opacity:0;pointer-events:none;z-index:3}
+.gcard.bought .flash{animation:bf .5s ease}
+@keyframes bf{0%{opacity:1}100%{opacity:0}}
+.gcard .mark{cursor:pointer;pointer-events:auto;background:#3380FF;color:#fff;border-radius:6px;
+  box-shadow:0 0 24px rgba(51,128,255,.31),inset 0 1px 2px rgba(255,255,255,.1);
+  font:700 10px var(--f);padding:2px 6px;white-space:nowrap}
+/* имба = ведущая карта на всю ширину (hook) */
+.gcard.imba{grid-column:1/-1;background:rgba(27,114,237,.3);border:1px solid var(--line);
+  border-radius:24px;animation:none;opacity:1}
+.gcard.imba .band{height:105px;border-radius:24px 24px 0 0}
+.gcard.imba .thh{top:16px;left:16px;right:16px}
+.gcard.imba .frow{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.gcard.imba .val{color:#fff}
+/* LOCKED — по фрейму 2001/сеток: голый замок+текст без пилюли-подложки (аудит 21.08);
+   заголовок имбы при этом влезает в одну строку, как в макете */
+.lockpill{display:inline-flex;gap:6px;align-items:center;justify-content:center;
+  font:700 12px var(--f);color:rgba(255,255,255,.5);flex-shrink:0}
+.lockpill img{width:12px;height:12px;opacity:.6}
+.hookrow{display:flex;gap:8px;align-items:center;border:1px solid rgba(255,255,255,.2);
+  border-radius:12px;padding:12px;margin-top:6px}
+.hookrow .hi{width:16px;height:16px;flex-shrink:0;display:flex;opacity:.8}
+.hookrow .hi img{width:100%;height:100%}
+.hookrow span:not(.hi){font:400 12px var(--f);flex:1;text-align:left;white-space:nowrap}
+.hookrow .btnp{height:31px;padding:0 12px;flex-shrink:0}  /* «Установить» 110.5pt по фрейму (аудит-2 B16) */
+.devnote{margin:26px 0 10px;text-align:center;color:var(--muted2);font:400 10.5px/1.5 var(--f)}
+
+/* ---------- ВОЙНА ---------- */
+.warbar{position:relative;height:46px;border-radius:14px;overflow:hidden;display:flex;
+  font:800 15px var(--f);margin-top:14px}
+.warbar .b{background:linear-gradient(90deg,#1B72ED,#0F4187);display:flex;align-items:center;padding-left:14px;transition:width .4s}
+.warbar .r{background:linear-gradient(90deg,#FF0F4B,#99092D);flex:1;display:flex;align-items:center;justify-content:flex-end;padding-right:14px}
+.warcap{display:flex;justify-content:space-between;color:var(--muted);font-size:13px;margin-top:8px}
+.warcap b{color:#fff}
+.wcard{margin-top:14px;background:var(--panel);border-radius:16px;padding:14px 16px;font-size:14px;color:var(--muted);line-height:1.5}
+.wcard b{color:#fff}
+.wcard .timer{font:800 26px var(--f);color:#fff;letter-spacing:1px;margin:4px 0}
+.wcard button{margin-top:10px;width:100%;border:0;border-radius:14px;padding:14px;
+  font:800 15px var(--f);background:var(--acc);color:#fff}
+
+/* ---------- ЗАДАНИЯ (Figma, волна 4) ---------- */
+.secrow{display:flex;justify-content:space-between;align-items:baseline;margin:16px 0 10px}
+.secrow .st{font:700 14px var(--f)}
+.secrow .sn{font:400 11px var(--f);color:var(--muted)}
+/* три слота ежедневного комбо (декоративный тизер) */
+.comboRow{display:flex;gap:10px}
+.cslot{flex:1;height:84px;border-radius:16px;background:#1C76F5;overflow:hidden;
+  display:flex;flex-direction:column}
+.cslot .cb{height:48px;flex-shrink:0;display:flex;background:rgba(255,255,255,.05)}
+.cslot .cb img{width:100%;height:100%;object-fit:cover}
+.cslot .cl{flex:1;display:flex;align-items:center;justify-content:center;
+  font:400 10px/1.4 var(--f);color:#fff;text-align:center;padding:0 4px}
+.cslot.mystery{background:linear-gradient(135deg,#121420,#0B1020);border:1px solid rgba(255,255,255,.1);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),inset 0 -1px 0 rgba(0,0,0,.4)}
+/* баннер награды комбо (живая кнопка сбора справа) */
+.rewardbar{display:flex;align-items:center;gap:8px;background:rgba(11,11,20,.8);
+  border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:4px 6px 4px 4px;margin-top:10px}
+.rewardbar .aw26{width:26px;height:26px;border-radius:8px;background:rgba(255,215,0,.1);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.rewardbar .aw26 img{width:14px;height:14px}
+.rewardbar .rl{font:400 12px var(--f);color:#9A9AB6}
+.rewardbar .rv{display:flex;gap:5px;align-items:center;font:800 16px var(--f)}
+.rewardbar button{margin-left:auto;height:32px;padding:0 14px;font:700 12px var(--f);
+  border-radius:12px;color:#fff;white-space:nowrap}
+.rewardbar button:disabled{background:rgba(255,255,255,.08);color:var(--muted);
+  border:0;box-shadow:none;text-transform:none}
+/* миссии «СПЕЦОПЕРАЦИИ» */
+.tasks{display:flex;flex-direction:column;gap:12px}
+.task{background:linear-gradient(135deg,rgba(255,255,255,.04),transparent);
+  border:1px solid #23273F;border-radius:16px;padding:12px;display:flex;gap:12px;align-items:center;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.task .tico{width:40px;height:40px;border-radius:12px;background:#1C1F33;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;font-size:20px}
+.task .tico img{width:22px;height:22px}
+.task .tx{flex:1;min-width:0}
+.task .tx b{font:500 14px/1.4 var(--f);display:block}
+.task .tx .rw2{display:flex;gap:5px;align-items:center;font:400 12px var(--f);
+  color:var(--muted);margin-top:3px}
+.task .tx .rw2 img,.task .tx .rw2 svg{width:12px;height:12px;flex-shrink:0}
+.task .tbtn{width:110px;height:32px;padding:0;font:700 12px var(--f);border-radius:12px;
+  flex-shrink:0;color:#fff;text-transform:none}
+.task .tst{border:0;background:none;font:700 12px var(--f);flex-shrink:0;padding:0 4px;white-space:nowrap}
+.task .tst.chk{color:#FC8319}
+.task .tst.don{background:linear-gradient(135deg,#01BE50,#09863C);
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* ---------- ТОП «Рейтинг» (Figma, волна 5) ---------- */
+/* свитчер Все / Мой лагерь: пилюля h36, активный сегмент — синяя заливка */
+.seg{display:flex;height:36px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  border-radius:18px;padding:3px}
+.seg button{flex:1;border:1px solid transparent;background:transparent;color:var(--muted);
+  font:500 13px var(--f);border-radius:15px;padding:0}
+.seg button.on{background:#327FFF;border-color:rgba(255,255,255,.15);color:#fff;font-weight:700}
+/* компакт-полоса битвы: только проценты + перетягивание, без сабтекстов */
+.tstrip{margin-top:12px;background:var(--panel);border-radius:16px;padding:16px}
+.tstrip .nums{display:flex;justify-content:space-between;font:900 14px var(--f);margin-bottom:10px}
+.tstrip .nums .kb{color:var(--rkn)} .tstrip .nums .kv{color:var(--vpn)}
+.tstrip .tug{height:16px;border-radius:100px;overflow:hidden;display:flex}
+.tstrip .tug .b{background:linear-gradient(90deg,#1B72ED,#0F4187)}
+.tstrip .tug .r{background:linear-gradient(90deg,#FF0F4B,#99092D);flex:1}
+/* строки лидеров: ранг · аватар 32 с лагерным штрихом · ник · чип+счёт */
+#lbrows{margin-top:12px}
+.rtrow{display:flex;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);
+  border-radius:16px;padding:12px;margin-bottom:8px}
+.rtrow .rk{width:16px;font:800 14px var(--f);color:var(--muted);flex-shrink:0;text-align:center}
+.rtrow .tav{width:32px;height:32px;border-radius:16px;overflow:hidden;flex-shrink:0;
+  border:1.5px solid var(--vpn);display:flex}
+.rtrow.rkn .tav{border-color:var(--rkn)}
+.rtrow .tav img{width:100%;height:100%;object-fit:cover}
+.rtrow .tn{flex:1;min-width:0;font:700 13px var(--f);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rtrow .tc{display:flex;gap:5px;align-items:center;font:700 13px var(--f);flex-shrink:0}
+/* своя строка: закреплена внизу, синий градиент как у главной CTA */
+.rtrow.me{background:linear-gradient(135deg,#337FFF,#1C7BFE);border-color:rgba(255,255,255,.15)}
+.rtrow.me .rk{color:rgba(255,255,255,.85)}
+.rtrow.me .tav{border-color:rgba(255,255,255,.6)}
+/* баннер-воронка «Установи ВПН» внизу таба → фейк-стор */
+.banner{margin:16px 0 6px;border-radius:16px;padding:12px;cursor:pointer;
+  background:#121420;border:1px solid #3380FF;display:flex;gap:10px;align-items:center}
+.banner .bt2{min-width:0}
+.banner .bt2 b{display:block;font:700 13px var(--f)}
+.banner .bt2 span{font:400 12px var(--f);color:#3380FF}
+.banner .chev{margin-left:auto;width:20px;height:20px;flex-shrink:0;display:flex}
+.banner .chev img{width:100%;height:100%}
+
+/* ---------- ФЕЙК-СТОР — страница App Store (Figma волна 8, СВЕТЛАЯ, SF Pro) ---------- */
+.store{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);z-index:110;
+  background:#fff;color:#000;display:none;flex-direction:column;position:fixed;
+  font-family:-apple-system,'SF Pro Text','SF Pro Display','Segoe UI',Roboto,sans-serif}
+.store.on{display:flex}
+.store .scroll{overflow-y:auto;padding:96px 0 110px;flex:1;scrollbar-width:none}
+.store .scroll::-webkit-scrollbar{display:none}
+.sb-status{position:absolute;top:0;left:0;right:0;height:54px;z-index:6;background:rgba(255,255,255,.85);
+  backdrop-filter:blur(14px);display:flex;align-items:flex-end;justify-content:space-between;
+  padding:0 28px 6px;font:590 17px inherit;font-weight:590}
+.sb-levels{display:flex;gap:7px;align-items:center}
+.sb-tool{position:absolute;top:54px;left:0;right:0;z-index:6;display:flex;justify-content:space-between;
+  padding:0 16px;background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,0))}
+.sb-circle{width:44px;height:44px;border-radius:50%;background:#F2F2F5;border:0;
+  display:flex;align-items:center;justify-content:center;color:#404040;font-size:19px;font-weight:510}
+.shead{display:flex;gap:16px;align-items:center;padding:10px 20px 20px}
+.sicon{width:118px;height:118px;border-radius:26px;flex-shrink:0;position:relative;overflow:hidden;
+  border:.5px solid rgba(0,0,0,.05);box-shadow:0 10px 24px -8px rgba(0,0,0,.25)}
+.sicon img{width:100%;height:100%;object-fit:cover;display:block;transform:scale(1.18)}  /* растр несёт белые поля ~7.5% — доводим арт до края плитки, как во фреймах (аудит-2 A§3) */
+.smeta{flex:1;min-width:0}
+.smeta h2{margin:0;font-size:22px;line-height:26px;font-weight:590;letter-spacing:-.35px;color:#000}
+.smeta .tag{margin:3px 0 0;font-size:15px;line-height:20px;font-weight:510;letter-spacing:-.5px;color:rgba(60,60,67,.6)}
+.getbtn{margin-top:34px;height:30px;min-width:104px;padding:0 21px;border:0;border-radius:100px;
+  background:#08F;color:#fff;font-size:16px;line-height:22px;font-weight:700;letter-spacing:-.4px;
+  position:relative;overflow:hidden}
+.getbtn.installing{background:#E5E5EA;color:#8E8E93}
+.getbtn .prog{position:absolute;left:0;top:0;bottom:0;width:0;background:#08F;opacity:.35}
+.getbtn.installing .prog{animation:inst 1.4s linear forwards}
+@keyframes inst{from{width:0}to{width:100%}}
+.getbtn .gt{position:relative}
+.srow{display:flex;align-items:center;justify-content:space-between;padding:12px 20px 20px;
+  border-top:.5px solid rgba(0,0,0,.15);border-bottom:.5px solid #BFBFBF;color:#8E8E93;
+  margin-top:16px;overflow-x:auto;scrollbar-width:none}
+.srow::-webkit-scrollbar{display:none}
+.srow .cell{flex:1;min-width:96px;text-align:center;padding:0 10px}
+.srow .cl{font-size:11px;line-height:18px;font-weight:510;letter-spacing:.2px;text-transform:uppercase;color:#AEAEB2}
+.srow .cv{font:700 22px/28px 'SF Pro Rounded',-apple-system,sans-serif;letter-spacing:-.4px;color:#8E8E93;margin:3px 0 1px}
+.srow .cs{font-size:13px;line-height:18px;color:#8E8E93}
+.srow .sep{width:1px;height:44px;background:rgba(0,0,0,.12);flex-shrink:0}
+.shots{display:flex;gap:10px;overflow-x:auto;padding:20px 20px 24px;scrollbar-width:none}
+.shots::-webkit-scrollbar{display:none}
+.shots img{flex:0 0 234px;width:234px;height:508px;border-radius:24px;border:.5px solid rgba(0,0,0,.1);
+  object-fit:cover;background:#070712}
+.sb-tab{position:absolute;left:0;right:0;bottom:0;height:95px;z-index:6;
+  background:linear-gradient(0deg,rgba(255,255,255,.92),rgba(255,255,255,.75));backdrop-filter:blur(14px);
+  display:flex;gap:14px;align-items:flex-start;padding:14px 22px 0}
+.sb-pill{flex:1;height:62px;border-radius:296px;background:#F7F7F7;border:.5px solid rgba(0,0,0,.06);
+  display:flex;align-items:center;justify-content:space-around;padding:0 6px}
+.sb-tabbtn{display:flex;flex-direction:column;align-items:center;gap:2px;border:0;background:none;
+  color:#404040;font-size:10px;line-height:12px;font-weight:510;padding:6px 4px;font-family:inherit}
+.sb-tabbtn svg{width:22px;height:22px}
+.sb-search{width:62px;height:62px;border-radius:50%;background:#F7F7F7;border:.5px solid rgba(0,0,0,.06);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+/* ---------- ОНБОРДИНГ ВПН — 4 УТП-слайда (Figma волна 11: 103:16195/16272/16301/16318, макет 390×844) ---------- */
+.onb{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);z-index:130;background:#070710;display:none;flex-direction:column;overflow:hidden}
+/* запуск как настоящей iOS-прилы (правка Саши 21.08): вырастает из иконки в сторе
+   (origin ≈ позиция иконки в шапке App Store), скругление тает до фуллскрина */
+.onb.on{display:flex;animation:appLaunch .55s cubic-bezier(.3,.9,.35,1) both;transform-origin:22% 13%}
+@keyframes appLaunch{from{transform:scale(.12);opacity:0;border-radius:56px}
+  35%{opacity:1}to{transform:none;opacity:1;border-radius:0}}
+/* фоновые градиент-панели ОБЩИЕ (в Figma идентичны на всех 4 фреймах) и тянутся ЗА футер
+   до низа экрана: y=321→38.03% (r32) и y=441→52.25% (r50) от H=844 */
+/* g1: в Figma градиент rgba(27,114,237,.01)→#000 интерполируется ПРЯМОЙ альфой,
+   CSS — предумноженной (синие полутона гаснут в серо-чёрный — «градиент криво»,
+   замечание Павла 21.08). 11 стопов повторяют фигмовскую кривую */
+.onb .g1{position:absolute;left:0;right:0;top:38.03%;bottom:0;border-radius:32px 32px 0 0;
+  background:linear-gradient(180deg,
+    rgba(27,114,237,.01) 0%, rgba(24,103,213,.109) 10%, rgba(22,91,190,.208) 20%,
+    rgba(19,80,166,.307) 30%, rgba(16,68,142,.406) 40%, rgba(14,57,119,.505) 50%,
+    rgba(11,46,95,.604) 60%, rgba(8,34,71,.703) 70%, rgba(5,23,47,.802) 80%,
+    rgba(3,11,24,.901) 90%, rgba(0,0,0,1) 100%);pointer-events:none}
+.onb .g2{position:absolute;left:0;right:0;top:52.25%;bottom:0;border-radius:50px 50px 0 0;
+  background:linear-gradient(180deg,rgba(255,255,255,.1),rgba(255,255,255,0));pointer-events:none}
+.slides{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;min-height:0;
+  position:relative;z-index:1}
+.slides::-webkit-scrollbar{display:none}
+/* слайд = 390×683 макета (нижние 161px — общий футер); позиции элементов — инлайном
+   из CONFIG.onboarding (проценты от Figma-геометрии слайда) */
+.slide{flex:0 0 100%;scroll-snap-align:center;position:relative;overflow:hidden;text-align:center}
+.slide .heroA{position:absolute}
+.slide .heroA img{width:100%;height:auto;display:block}
+.slide .deco{position:absolute;opacity:.6}
+.slide .deco img{width:100%;height:auto;display:block}
+.slide .txt{position:absolute;top:73.65%;left:0;right:0;padding:0 24px}  /* y=503/683 */
+.slide h2{font:700 24px/29px var(--f);margin:0;color:#fff;white-space:pre-line}
+.slide p{font:400 14px/21px 'Geist',var(--f);color:#fff;margin:16px 0 0}
+/* футер: дотсы 12px → 39px → кнопка 70px → 40px до низа (Figma: 683/734/804) */
+.onbfoot{flex:none;position:relative;z-index:1;display:flex;flex-direction:column;align-items:stretch;
+  gap:39px;padding:0 16px max(40px, calc(16px + env(safe-area-inset-bottom)))}
+.dots{display:flex;gap:8px;justify-content:center}
+.dots i{width:12px;height:12px;border-radius:4px;background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(10px);transition:.2s}
+.dots i.on{background:linear-gradient(135deg,#337FFF,#005ADA);border-color:transparent;
+  box-shadow:0 6px 14px -4px rgba(51,127,255,.2),inset 0 1px 2px #fff}
+.nextbtn{height:70px;width:100%;font-size:16px}
+
+/* ---------- ИНТРО-ОНБОРДИНГ ИГРЫ — ПИКСЕЛЬ-ПЕРФЕКТ по Figma волна 15
+   (фреймы 148:8655, 169:13643/13741/13870, 148:8711 — Миша допилил арты 20.08;
+   макет 390×844): слайдер ДО выбора стороны.
+   Герой слайда = запечённый кроп фрейма (верхние 390×580: сцена/мокапы + начало
+   фоновых панелей с их скруглениями); ниже 580px панели продолжаются ЖИВЫМ CSS
+   Фон слайда = запечённый фрейм ЦЕЛИКОМ (390×844): сцена/мокапы + панели с их
+   градиентами и амбиент-свечением сцены, которое в Figma затекает ниже панелей
+   (плоский CSS-градиент его не повторял — шов был виден, Ф-замечание Павла 21.08);
+   тексты/кнопки фрейма затёрты интерполяцией при запечке (tools: запечка в
+   ref/audit → мастера onb-intro-N-w15). Тексты/точки/кнопки — живые
+   (CONFIG.introOnboarding) поверх; ниже y=844 фрейм уходит в чистый #000,
+   фон .intro совпадает ---------- */
+.intro{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);
+  z-index:125;background:#000;display:none;flex-direction:column;overflow:hidden}
+.intro.on{display:flex}
+/* подложка под футером (зона ниже слайдера): тот же запечённый фрейм, прижат к низу —
+   градиентные панели Figma продолжаются под точками/кнопкой без шва; между слайдами
+   низ фреймов различим лишь затухающим амбиентом (Δ≤5/255), подложка одна */
+.intro .ibg{position:absolute;left:0;right:0;bottom:0;width:100%;height:auto;pointer-events:none}
+.islides{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;
+  min-height:0;position:relative;z-index:1}
+.islides::-webkit-scrollbar{display:none}
+.islide{flex:0 0 100%;scroll-snap-align:center;position:relative;overflow:hidden;text-align:center}
+.islide .ihero{position:absolute;left:0;top:0;width:100%;height:auto;display:block}
+/* заголовок: Figma y583..639 (Unbounded 600 20/28, центр, 2 строки) — прижат к низу
+   зоны слайдов (дно текста в макете за 23px до точек) */
+.islide h2{position:absolute;left:24px;right:24px;bottom:23px;margin:0;
+  font:600 20px/28px var(--f);color:#fff;white-space:pre-line}
+/* футер интро: точки y662 → 32px → кнопка 70px → 28px → «Пропустить» → 23px до низа */
+.ifoot{flex:none;position:relative;z-index:1;display:flex;flex-direction:column;align-items:stretch;
+  padding:0 16px max(23px, calc(10px + env(safe-area-inset-bottom)))}
+.ifoot .dots{margin-bottom:32px}
+.ifoot .iskip{margin-top:28px;border:0;background:none;padding:0;
+  font:700 14px/17px var(--f);color:rgba(255,255,255,.6);text-transform:uppercase}
+
+/* ---------- ПЕРЕХОД ИГРА → СТОР — ПИКСЕЛЬ-ПЕРФЕКТ по Figma волна 13:
+   (1) системный «Открыть ссылку?» прямо в игре (фрейм 160:12487, iOS-алерт тёмный);
+   (2) Safari с живой страницей apps.apple.com и вопросом «Открыть эту страницу
+       в приложении App Store?» (фрейм 148:8598);
+   (3) стор въезжает app-switch-анимацией. Тайминги/кривые — CONFIG.transitions ---------- */
+.iosdlg{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);
+  z-index:108;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;
+  font-family:-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif}
+.iosdlg.on{display:flex;animation:dlgIn .18s ease-out}
+@keyframes dlgIn{from{opacity:0}to{opacity:1}}
+/* бокс = промеры растра alert-160-12485@3x (298 ди-px шириной): r34-сквиркл, блюр-материал
+   ~#1B1C20, заголовок 17 semibold ВЛЕВО (x25), пилюля URL x16 r16 (+белый 9%, высота по
+   контенту — наш URL короче эталонного), кнопки РАВНЫЕ 129×48 капсули (r24), зазор 8,
+   «Открыть» #3E87F6, «Отмена» +белый 7.5%; перенос URL = overflow-wrap:anywhere как в iOS */
+.idbox{width:298px;border-radius:34px;background:rgba(26,27,32,.82);
+  -webkit-backdrop-filter:blur(30px) saturate(1.4);backdrop-filter:blur(30px) saturate(1.4);
+  padding:22px 16px 15px;color:#fff;animation:dlgPop .22s cubic-bezier(.3,1.4,.6,1) both}
+@keyframes dlgPop{from{transform:scale(1.12);opacity:0}to{transform:none;opacity:1}}
+.idbox .idt{font-weight:600;font-size:17px;line-height:22px;letter-spacing:-.4px;
+  text-align:left;padding:0 9px}
+.idbox .idu{margin-top:15px;background:rgba(255,255,255,.09);
+  border-radius:16px;padding:6px 10px;display:flex;align-items:center;justify-content:center;
+  font-size:16px;line-height:20px;text-align:center;overflow-wrap:anywhere;color:#fff}
+.idbox .idbtns{display:flex;gap:8px;margin-top:23px}
+.idbox .idbtns button{flex:1;height:48px;border:0;border-radius:24px;color:#fff;
+  font-family:inherit;font-weight:600;font-size:17px;line-height:22px;letter-spacing:-.4px}
+.idbox .idc{background:rgba(255,255,255,.075)}
+.idbox .ido{background:#3E87F6}
+.safari{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);
+  z-index:109;background:#F7F7F7;display:none;flex-direction:column;color:#000;
+  font-family:-apple-system,'SF Pro Text','Segoe UI',Roboto,sans-serif}
+.safari.on{display:flex;animation:swAppIn var(--swms) var(--swease) both}
+/* хром Safari (фрейм 148:8598, волна 18): статус-бар (9:41 + уровни) и весь нижний бар
+   (адресная строка + иконки + тень) = SVG-экспорт слоёв Миши КАК ЕСТЬ — ноль отсебятины */
+.saf-status{flex:none}
+.saf-status img,.saf-bar img{display:block;width:100%;height:auto}
+.saf-page{flex:1;min-height:0;position:relative;overflow:hidden;background:#EFEFF2}
+.saf-page .pg{width:100%;height:100%;object-fit:cover;object-position:top}
+.saf-dim{position:absolute;inset:0;background:rgba(0,0,0,.15);opacity:0;transition:opacity .25s;pointer-events:none}
+.saf-dim.show{opacity:1}
+/* системный вопрос Safari (фрейм 148:8598: бокс 343×104 на y310 из 812, #1C1C1E, r20,
+   паддинг 16; страница видна y38..684 → верх бокса = (310−38)/646 = 42.1% зоны страницы) */
+.saf-dlg{position:absolute;left:16px;right:16px;top:42.1%;background:#1C1C1E;
+  border:.5px solid #4F4F4F;border-radius:20px;padding:16px;color:#fff;
+  opacity:0;transform:scale(.96);pointer-events:none;transition:.25s}
+.saf-dlg.show{opacity:1;transform:none;pointer-events:auto}
+.saf-dlg .sdt{font-size:14px;line-height:22px;font-weight:510;letter-spacing:-.4px;max-width:266px}
+.saf-dlg .sdb{display:flex;justify-content:flex-end;gap:12px;margin-top:6px}
+.saf-dlg button{border:0;background:none;padding:0;color:#0A84FF;font-size:17px;line-height:22px;
+  font-family:inherit;letter-spacing:-.4px;font-weight:400}
+.saf-dlg button.op{font-weight:590}
+.saf-bar{flex:none;position:relative;margin-top:-2px}   /* svg несёт 2px тени бара над его фоном */
+.saf-home{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
+  width:134px;height:5px;border-radius:100px;background:#000}
+/* стор открывается app-switch-анимацией по «Открыть» в вопросе Safari */
+.store.on{animation:swAppIn var(--swms) var(--swease) both}
+/* ---------- app-switch переходы (как в iOS: уходящая прила сжимается-уезжает,
+   приходящая наезжает; только transform/opacity — без reflow). CONFIG.transitions ---------- */
+@keyframes swAppIn{from{transform:translateX(55%) scale(.94);opacity:.3}to{transform:none;opacity:1}}
+@keyframes swAppOut{to{transform:translateX(-26%) scale(.9);opacity:0}}
+.vapp.on{display:flex;animation:swAppIn var(--swms) var(--swease) both}
+.vapp.away{animation:swAppOut var(--swms) var(--swease) both}
+body.swin>header,body.swin>main,body.swin>nav{animation:swGameIn var(--swms) var(--swease) both}
+@keyframes swGameIn{from{transform:translateX(20%) scale(.96);opacity:.25}to{transform:none;opacity:1}}
+
+/* ---------- ПРИЛОЖЕНИЕ ВПН (Figma волна 8: фреймы 13-15) ---------- */
+.vapp{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);z-index:132;
+  background:#070712;display:none;flex-direction:column;overflow:hidden}
+/* .vapp.on — выше, в блоке app-switch переходов */
+.vnav{flex:none;display:flex;align-items:center;justify-content:space-between;padding:16px 24px 0}  /* фрейм 1967: кнопки y16 (аудит-2 A§5: было 12 — весь блок сидел на 12pt выше) */
+.vnav .vbtn{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;padding:0}
+.vnav .vbtn img{width:20px;height:20px}
+.vnav .vt{font:700 18px var(--f);color:#fff}
+.vstatus{flex:none;margin-top:48px;text-align:center;font:900 24px var(--f);color:#fff}  /* фрейм 1967: статус y104 = нав-бар 56 (16+40) + 48 (аудит-2 A§5) */
+.vapp.conn .vstatus{color:#10B981}
+/* фрейм 1967: кольцо y179 (45 от статуса), подсказка y471 (36 от кольца), слак вниз */
+.vherowrap{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:flex-start;padding-top:45px;gap:36px}
+/* кольцо по фрейму 1967: тор = заливка 20% синего (у слоя-двойника с блюром 54 — гало),
+   кнопка #0E0F24 с белой градиент-обводкой 22% (5.4px) и синей тенью 40/6.7 */
+.vring{width:256px;height:256px;aspect-ratio:1;border-radius:50%;flex-shrink:1;
+  background:rgba(51,128,255,.2);border:1.35px solid rgba(255,255,255,.08);
+  box-shadow:0 0 54px 0 rgba(51,128,255,.1);   /* гало едва заметное, как LAYER_BLUR фрейма (аудит-2 A§5: .25/8px светил втрое ярче) */
+  display:flex;align-items:center;justify-content:center;cursor:pointer}
+.vpower{width:84.4%;height:84.4%;border-radius:50%;
+  background:linear-gradient(#0E0F24,#0E0F24) padding-box,
+    linear-gradient(135deg,rgba(255,255,255,.22),rgba(255,255,255,0) 60%) border-box;
+  border:5.4px solid transparent;box-shadow:0 0 40.4px 6.7px rgba(51,128,255,.2);
+  display:flex;align-items:center;justify-content:center}
+.vpower img{width:65px;height:65px;opacity:.92}
+.vapp.conn .vring{background:rgba(16,185,129,.2);box-shadow:0 0 60px 8px rgba(16,185,129,.22)}
+/* вкл-кнопка по фрейму (аудит-2 A§6): мятная кромка над своей заливкой + зелёное ГАЛО
+   вокруг кнопки; «игровых губ» 0±4px во фрейме нет */
+.vapp.conn .vpower{background:linear-gradient(135deg,#10B981,#06A671) padding-box,
+  var(--edgeV) border-box,var(--edgeH) border-box,
+  linear-gradient(135deg,#10B981,#06A671) border-box;
+  border:2px solid transparent;
+  box-shadow:0 0 56px 14px rgba(16,185,129,.5),inset 0 9px 6.5px rgba(255,255,255,.25)}
+.vhint{font:400 13px var(--f);color:var(--muted);text-align:center}
+.vread{flex:none;width:342px;max-width:calc(100% - 48px);margin:0 auto;   /* фрейм: y535, слак герой-зоны */
+  display:flex;flex-direction:column;gap:12px}
+.vcard{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  border:1px solid var(--line);border-radius:16px;padding:16px}
+.vcard .l{display:flex;align-items:center;gap:12px;min-width:0}
+.vcard .l img{width:20px;height:20px}
+.vcard .ll{font:500 14px var(--f);color:var(--muted)}
+.vcard .lv{font:700 14px var(--f);color:#fff;white-space:nowrap}
+.vspeed{display:flex;gap:12px}
+.vs1{flex:1;display:flex;align-items:center;gap:10px;border:1px solid var(--line);
+  border-radius:16px;padding:16px;min-width:0}
+.vs1 .circ{width:28px;height:28px;border-radius:14px;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0}
+.vs1 .circ img{width:14px;height:14px}
+.vs1 .circ.g{background:rgba(16,185,129,.1)}
+.vs1 .circ.r{background:rgba(239,68,68,.1)}
+.vs1 .col{display:flex;flex-direction:column;gap:2px;min-width:0}
+.vs1 .sl{font:400 12px var(--f);color:var(--muted)}
+.vs1 .sv{font:700 14px var(--f);color:#fff;white-space:nowrap}
+.vdrawer{flex:none;width:342px;max-width:calc(100% - 48px);   /* фрейм: сервер y733 (зазор 68), до низа 43 */
+  margin:68px auto max(43px, calc(20px + env(safe-area-inset-bottom)))}
+.vserver{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:rgba(255,255,255,.1);border-radius:16px;padding:16px;cursor:default}
+.vserver .l{display:flex;align-items:center;gap:12px}
+.vserver .fl{font:400 20px -apple-system,sans-serif}
+.vserver .cn{font:500 14px var(--f);color:#fff}
+.vserver .sd{font:400 13px var(--f);color:var(--muted);margin-top:2px;white-space:nowrap}
+.vserver .ch{width:18px;height:18px;flex-shrink:0}
+
+/* шторка подарка в приложении ВПН (модалка giftM: bsheet с левой выключкой).
+   Раскладка по фрейму 1969 (аудит-2 A§8): хэндл→заголовок 37, панель→CTA 32, низ 32 */
+.bsheet.left{text-align:left}
+.bsheet .gh{margin:36px 0 0;font:900 18px var(--f);color:#fff}  /* хэндл→заголовок по фрейму 1969 (маржины схлопываются с mb16 хэндла) */
+.bsheet .gs{margin:8px 0 0;font:400 14px/1.5 var(--f);color:var(--muted)}
+.bsheet.left .cta70{margin-top:32px}
+/* кнопки подарка по фрейму 1969 (аудит-2 A§8): ПЛОСКАЯ зелёная заливка (без градиента
+   и глянца), CTA #0AAF78, «Скопировать» #09A370; кромка — над своей заливкой */
+.bsheet.left .btng{background:linear-gradient(#0AAF78,#0AAF78) padding-box,
+  var(--edgeV) border-box,var(--edgeH) border-box,linear-gradient(#0AAF78,#0AAF78) border-box;
+  box-shadow:none}
+.bsheet.left .pbox .copy{background:linear-gradient(#09A370,#09A370) padding-box,
+  var(--edgeV) border-box,var(--edgeH) border-box,linear-gradient(#09A370,#09A370) border-box;
+  box-shadow:none}
+.pbox{margin-top:20px;background:rgba(255,255,255,.1);border-radius:16px;padding:16px;
+  display:flex;flex-direction:column;gap:14px}
+.pbox .plabel{font:700 11px var(--f);letter-spacing:.04em;text-transform:uppercase;color:#fff;
+  text-shadow:0 0 14px rgba(51,128,255,.5)}
+.pbox .crow{display:flex;align-items:center;gap:12px}
+.pbox .cval{flex:1;min-width:0;border:1px solid rgba(255,255,255,.2);border-radius:10px;
+  padding:13px 10px;font:900 12.5px var(--f);color:#fff;white-space:nowrap;overflow:hidden;text-align:center}
+.pbox .copy{width:136px;height:41px;flex-shrink:0;font-size:12px}  /* фрейм 1969: 40.5pt (аудит-2 A§8) */
+.pbox .pcap{font:400 14px/1.5 'Geist',var(--f);color:var(--muted)}
+.pbox .pcap b{font-weight:700;color:#F6A351}  /* «легендарная карточка» — оранжевая по фрейму 1969 (аудит-2 A§8; была жёлтая #FFC400) */
+
+/* ---------- всплывашка карточки (Figma волна 9, фрейм 108:20141) ---------- */
+.cardpop .cthumb{width:311px;max-width:100%;height:180px;border-radius:16px;overflow:hidden;
+  border:1px solid var(--line);margin:8px auto 0;display:flex}
+.cardpop .cthumb img{width:100%;height:100%;object-fit:cover}
+.cardpop .ct{margin:20px 0 0;font:900 18px var(--f);color:#fff}
+.cardpop .cd{margin:8px auto 0;max-width:358px;font:400 12px/1.5 var(--f);color:var(--muted)}
+.cardpop .cpills{display:flex;justify-content:center;gap:8px;margin-top:16px}
+.cardpop .cpill{display:flex;align-items:center;gap:8px;height:28px;padding:0 16px;
+  background:rgba(255,255,255,.1);border-radius:20px;font:700 14px var(--f);color:#fff}
+.cardpop .cpill .ph{color:rgba(255,255,255,.5);font-weight:400}
+.cardpop .cta70{display:flex;align-items:center;justify-content:center;gap:8px}
+.cardpop .cta70.poor{opacity:.4}
+.cardpop .cmax{margin-top:16px;font:700 14px var(--f);color:var(--acc2)}
+/* залоченный шит (волна 13, фрейм 151:11340): гасится ТОЛЬКО заливка (синий на 50%),
+   текст и замок остаются белыми; связка «замок+текст» отцентрована (аудит-2 B13/B14:
+   opacity на контейнере серил текст, а flex растаскивал замок к краю) */
+.cardpop .cta70.chainlk{pointer-events:none;gap:16px;background:rgba(51,128,255,.5);
+  box-shadow:none;font:600 13px/20px var(--f);text-transform:none;white-space:normal}
+.cardpop .cta70.chainlk img{width:24px;height:24px;flex-shrink:0}
+.cardpop .cta70.chainlk span{flex:0 1 auto;max-width:230px}
+.bsheet .shx{position:absolute;top:7px;right:8px;width:32px;height:32px;border:0;   /* центр × в ~23px от угла шита (аудит-2 B11) */
+  background:none;padding:0;display:flex;align-items:center;justify-content:center;z-index:2}
+.bsheet .shx img{width:20px;height:20px}
+
+/* ---------- idle-событие (Figma волна 10, фреймы 1959/1960): шит 476px ---------- */
+.eventpop{min-height:476px;display:flex;flex-direction:column;text-align:center;
+  position:relative}
+.bsheet .ex{position:absolute;top:16px;right:10px;width:32px;height:32px;border:0;   /* фрейм: X-центр x364 (аудит-2 C-5: right:0 прижимал к кромке экрана) */
+  background:none;padding:0;display:flex;align-items:center;justify-content:center}
+.eventpop .ex img{width:20px;height:20px}
+.eventpop .eart{width:311px;max-width:100%;height:180px;margin:8px auto 0;border-radius:16px;
+  overflow:hidden;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+  font-size:96px;flex-shrink:0;position:relative}
+.eventpop .eart img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;max-width:none}
+/* идл-шит (арт первым после хэндла): верх арта на 32-й px от верха шита, как во фрейме
+   (аудит-2 C-3: было 38 — весь контент сидел на 6-7px ниже); eventOkM не задет */
+.eventpop .ex+.eart{margin-top:2px}
+/* кропы артов из фреймов Миши 20.08 (позиция картинки внутри клипа 311×180):
+   ВПН — image 2099 (349×195 @ -31,-1), РКН — image 2104 укрупнён (638×356 @ -150,-32) */
+.eventpop .eart.side-vpn img{width:112.22%;height:108.33%;left:-9.97%;top:-0.56%;object-fit:fill}
+.eventpop .eart.side-rkn img{width:205.14%;height:197.78%;left:-48.23%;top:-17.78%;object-fit:fill}
+.eventpop .ee{margin:29px auto 0;padding:6px 10px;background:rgba(255,255,255,.1);border-radius:12px;
+  font:400 12px/1.5 var(--f);color:var(--muted);width:fit-content}
+.eventpop .eh{margin:12px 0 0;font:900 24px/1.2 var(--f);color:#fff}
+.eventpop .ehint{margin:8px 0 0;font:400 14px/1.5 var(--f);color:var(--muted)}
+.bsheet.eventpop .cta70{margin-top:auto}   /* CTA прижата к низу шита 476 (фрейм: y742, до низа 32; аудит-2 C-4) */
+
+/* ---------- модалки ---------- */
+.modal{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);background:rgba(0,0,0,.75);z-index:140;display:none;
+  align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+/* нижние шторки (Figma: активация промокода / успех) */
+.modal.bot{align-items:flex-end;padding:0;background:rgba(0,0,0,.7)}
+.bsheet{width:100%;max-width:var(--colw);margin:0 auto;position:relative;background:#0B0B14;border-radius:32px 32px 0 0;
+  border-top:1.5px solid rgba(255,255,255,.2);padding:10px 16px calc(32px + env(safe-area-inset-bottom));
+  animation:up .25s ease;max-height:743px;overflow-y:auto;text-align:center}  /* поля 16 и низ 32 — по фреймам шитов (аудит-2 B10/C-4: было 20/24, кнопки выходили уже 358) */
+.bsheet .dragpill{width:40px;height:4px;border-radius:999px;background:rgba(255,255,255,.6);
+  opacity:.3;margin:0 auto 16px}
+.bsheet h2{font:900 18px var(--f);margin:0 0 8px}
+.bsheet .lbl{font:400 14px var(--f);color:var(--muted);margin:0 0 14px}
+.bsheet .eyebrow{font:800 12px var(--f);color:#FFC400;letter-spacing:.06em;margin:2px 0 6px}
+.bsheet .hline{font:900 18px var(--f);color:#fff;margin:0 0 14px}  /* фрейм 2008: одна строка */
+/* шторка ввода кода — зазоры по фрейму 1979 (аудит-2 A§9: контент был подтянут вверх):
+   хэндл→заголовок ~48, заголовок→поле +16, поле→кнопка 28 */
+.codepop h2{margin-top:34px}   /* схлопывается с mb16 хэндла → зазор 34 (заголовок на 48-й px шита) */
+.codepop .lbl{margin-bottom:30px}
+.codepop .coderow{margin-bottom:0}
+.codepop .codeerr{margin-bottom:0}
+.bsheet.codepop .cta70{margin-top:10px}   /* специфичнее общего .bsheet .cta70 (он ниже по файлу) */
+/* шторка успеха — зазоры по фрейму 1980 (аудит-2 A§10: шит был на 67pt ниже/сжат):
+   хэндл→метка 48; бонус-плашка и её зазор до кнопки — в правиле .bonuspill ниже */
+.unlockpop .eyebrow{margin-top:36px}   /* схлопывается с mb16 хэндла → хэндл→метка 48 по фрейму */
+.coderow{display:flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,.3);
+  border-radius:12px;padding:4px 16px 4px 4px;margin-bottom:8px}
+.coderow .codein{flex:1;border:0;background:transparent;margin:0;padding:12px;text-align:left;
+  font:700 16px var(--f);letter-spacing:1px}
+.coderow .paste{padding:8px 0;text-decoration:none;color:#1B72ED;font:500 16px var(--f);white-space:nowrap}
+.bsheet .cta70{width:100%;height:70px;margin-top:12px;font-size:16px}
+.bonuspill{display:flex;gap:8px;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.1);border-radius:16px;padding:9px 13px;margin:14px 0 26px;
+  font:800 11px var(--f);letter-spacing:.04em}  /* фрейм 1980: плашка 36pt, до кнопки 32 (аудит-2 A§10) */
+.bonuspill img{width:18px;height:18px}
+.imbaprev{text-align:left;border-radius:24px;background:rgba(27,114,237,.3);
+  border:1px solid var(--line);overflow:hidden}
+.imbaprev .band{height:105px;display:flex}
+.imbaprev .band img{width:100%;height:100%;object-fit:cover}
+.imbaprev .pb{padding:12px}
+.imbaprev .nm{font:700 14px var(--f)}
+.imbaprev .val{display:flex;gap:5px;align-items:center;font:700 13px var(--f);margin-top:6px}
+.imbaprev .val .ph{color:rgba(255,255,255,.5)}
+.imbaprev .note{font:400 10px var(--f);color:var(--muted);margin-top:5px}
+
+/* ---------- война v2 (Figma: «Битва команд») ---------- */
+.prize{display:flex;gap:10px;align-items:center;background:rgba(11,11,20,.8);
+  border-radius:12px;padding:10px 12px;margin-top:12px;text-align:left}
+.prize .aw{width:40px;height:40px;border-radius:10px;background:rgba(255,215,0,.1);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.prize .aw img{width:22px;height:22px}
+.prize .pl{font:400 10px var(--f);color:var(--muted)}
+.prize .pv{display:flex;gap:5px;align-items:center;font:800 14px var(--f);margin-top:2px}
+.refpanel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;margin-top:12px;text-align:left}
+.refpanel .rrow{display:flex;gap:10px;align-items:flex-start}
+.refpanel .ui{width:20px;height:20px;flex-shrink:0;display:flex}
+.refpanel .ui img{width:100%;height:100%}
+.refpanel p{margin:0;font:400 11px/1.4 var(--f);color:#fff;flex:1}
+.refpanel .btnp{margin-top:10px;height:30px;width:100%;padding:0 16px;font-size:11px;border-radius:12px}  /* «Пригласить» во всю панель, как во фрейме 2005 (аудит-2 C2) */
+.topttl{font:700 14px var(--f);margin:18px 0 10px}
+.toprow{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:12px;margin-bottom:8px;backdrop-filter:blur(6px)}
+.toprow .rk{width:16px;font:800 14px var(--f);color:var(--muted);flex-shrink:0}
+.toprow .tav{width:32px;height:32px;border-radius:16px;overflow:hidden;flex-shrink:0;
+  border:1.5px solid var(--vpn);display:flex;align-items:center;justify-content:center;font-size:18px}
+.toprow.rkn .tav{border-color:var(--rkn)}
+.toprow .tav img{width:100%;height:100%;object-fit:cover}
+.toprow .tn{flex:1;min-width:0;text-align:left}
+.toprow .tn b{display:block;font:700 13px var(--f);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toprow .tn span{font:600 9px var(--f);letter-spacing:.06em;color:var(--vpn)}
+.toprow.rkn .tn span{color:var(--rkn)}
+.toprow .tc{display:flex;gap:5px;align-items:center;font:700 13px var(--f)}
+.sheet{width:100%;max-width:400px;background:#12121f;border:1px solid var(--line);border-radius:24px;
+  padding:26px 22px;text-align:center;animation:up .25s ease;max-height:726px;overflow-y:auto}
+@keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+.sheet .big{font-size:52px}
+.sheet h2{font:800 22px/1.25 var(--f);margin:10px 0 8px}
+.sheet p{color:var(--muted);font-size:14.5px;line-height:1.5;margin:0 0 16px}
+.sheet p b{color:#fff}
+.sheet .cta{width:100%;border:0;border-radius:16px;padding:16px;font:800 16px var(--f);
+  background:var(--acc);color:#fff}
+.sheet .later,.bsheet .later{width:100%;border:0;background:transparent;color:var(--muted);
+  font:600 14px var(--f);padding:14px 0 0}
+.codein{width:100%;border:1.5px solid var(--line);background:#0d0d1a;color:#fff;border-radius:14px;
+  padding:15px;font:800 18px/1 'SF Mono',Menlo,monospace;letter-spacing:2px;text-align:center;
+  text-transform:uppercase;outline:none;margin-bottom:8px}
+.codein:focus{border-color:var(--acc)}
+.codein.err{border-color:#ff5560;animation:wob .45s ease}
+.codeerr{color:#ff5560;font-size:13px;min-height:18px;margin-bottom:8px}
+.paste{border:0;background:transparent;color:var(--muted);font:600 13.5px var(--f);
+  padding:8px 0 14px;text-decoration:underline;text-underline-offset:3px}
+.gain{background:var(--accdim);border-radius:14px;padding:12px;margin-bottom:14px;
+  font:700 15px var(--f);display:flex;flex-direction:column;gap:5px}
+.boss{background:linear-gradient(120deg,#2b0b0e,#1a1a1f 70%);border:1px solid #4b1a1f;border-radius:16px;
+  padding:14px;display:flex;gap:14px;align-items:center;text-align:left;margin-bottom:14px}
+.bossart{position:relative;font-size:44px;flex-shrink:0}
+.bossart .laser{position:absolute;top:16px;left:34px;width:46px;height:2.5px;border-radius:2px;
+  background:linear-gradient(90deg,#ff2a2a,transparent);animation:lz .9s ease-in-out infinite}
+.bossart .laser.l2{top:22px;animation-delay:.45s}
+@keyframes lz{0%,100%{opacity:.25}50%{opacity:1}}
+.boss b{font:800 15px var(--f);display:block;margin-bottom:3px}
+.boss span{color:var(--muted);font-size:12.5px;line-height:1.45}
+
+/* ---------- FTUE-коуч (обучение после выбора лагеря) ---------- */
+.coach{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);z-index:90;pointer-events:none}
+.coach.off{display:none}
+.coachPtr{position:fixed;font-size:44px;z-index:92;filter:drop-shadow(0 4px 10px rgba(0,0,0,.6));
+  animation:cptr .9s ease-in-out infinite;transition:left .35s,top .35s}
+@keyframes cptr{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.coachTxt{position:fixed;background:#f2f2f4;color:#0b0b0d;border-radius:14px;padding:10px 14px;
+  font:700 14px var(--f);max-width:240px;z-index:92;transition:left .35s,top .35s;text-align:center}
+.coachTxt .cnt{display:block;margin-top:3px;font:800 16px var(--f);color:var(--brand)}
+.coachSkip{position:fixed;right:max(12px,calc(50% - var(--colw)/2 + 12px));bottom:calc(92px + env(safe-area-inset-bottom));z-index:93;
+  pointer-events:auto;border:1px solid var(--line);background:rgba(20,20,23,.88);color:var(--muted);
+  font:600 12.5px var(--f);border-radius:999px;padding:9px 15px}
+.gcard.tuthl{border:1.5px solid var(--acc);animation:tutGlow 1.2s ease-in-out infinite}
+@keyframes tutGlow{0%,100%{box-shadow:0 0 6px var(--accdim)}50%{box-shadow:0 0 24px var(--accdim)}}
+
+/* ---------- мини-игры: оверлей (запуск — плитки таба «Игры») ---------- */
+.mgview{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:var(--colw);z-index:120;background:var(--bg);display:none;flex-direction:column;
+  padding:calc(10px + env(safe-area-inset-top)) 18px 0}
+.mgview.on{display:flex}
+.mgbar{display:flex;align-items:center;justify-content:space-between;padding:8px 0 2px}
+.mgbar b{font:800 18px var(--f)}
+.mgbar .x{border:0;background:rgba(255,255,255,.08);color:var(--muted);width:36px;height:36px;border-radius:50%;
+  font:700 16px var(--f);flex-shrink:0}
+.mgsub{color:var(--muted);font-size:14px;line-height:1.5;margin:6px 0 14px}
+.mgstage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+  padding-bottom:60px}
+.mground{font:700 13px var(--f);color:var(--acc2);background:var(--accdim);border-radius:999px;padding:6px 14px}
+/* тайминг-бар «взлома шифра» */
+.tbar{width:100%;max-width:340px;height:54px;border-radius:14px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.tzone{position:absolute;top:0;bottom:0;background:rgba(46,158,91,.45);
+  border-left:2px solid #2e9e5b;border-right:2px solid #2e9e5b}
+.tmark{position:absolute;top:0;bottom:0;width:4px;background:#fff;border-radius:2px;box-shadow:0 0 10px #fff}
+.mgbtn{border:0;border-radius:16px;background:var(--acc);color:#fff;font:800 16px var(--f);padding:16px 60px}
+.mgbtn.bank{background:#2e9e5b;padding:14px 40px}   /* «Забрать ×N» — забрать буст серии (волна 21) */
+/* капча (волна 21: 6×6 — ячейки ~47px, потому зазор/радиус/шрифт мельче; колонки задаёт JS из CONFIG.cols) */
+.captimer{width:100%;max-width:340px;height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+.captimer i{display:block;height:100%;background:var(--acc);border-radius:999px}
+.capgrid{display:grid;gap:6px;width:100%;max-width:340px}
+.capcell{aspect-ratio:1;border-radius:10px;background:var(--card);border:1.5px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer}
+.capcell.hit{border-color:#2e9e5b;background:rgba(46,158,91,.18)}
+.capcell.boom{border-color:#ff5560;background:rgba(245,51,63,.18);animation:wob .45s ease}
+/* экран победы мини-игры */
+.mgwin{text-align:center}
+.mgwin .big{font-size:56px;display:flex;justify-content:center}
+.mgwin .big img{width:96px;height:96px;border-radius:16px;object-fit:cover}
+.mgwin h3{font:800 22px var(--f);margin:10px 0 6px}
+.mgwin p{color:var(--muted);margin:0 0 20px;font-size:15px}
+
+.toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#f2f2f4;color:#0b0b0d;
+  font:700 14px var(--f);border-radius:999px;padding:10px 18px;z-index:150;opacity:0;
+  pointer-events:none;transition:opacity .25s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:358px}
+.toast.on{opacity:1}
+</style>
+</head>
+<body data-side="vpn">
+<!-- СЦЕНА 390×844 (волна 19): всё приложение внутри, кадр скейлится под любой экран -->
+<div id="stage">
+
+<!-- каркас: весь контент генерится из ART + CONFIG (см. скрипт) -->
+<div class="campsel" id="campsel"></div>
+
+<div id="appscroll"><!-- скролл контента внутри сцены (раньше скроллил body) -->
+<header>
+  <div class="statusrow" id="statusrow"></div>
+</header>
+
+<main>
+  <section class="view on" id="v-tap">
+    <div class="tapwrap">
+      <div class="battle" id="battleCard"></div>
+      <!-- промо-баннер события на штабе (волна 13): живёт постоянно, тап = ивент-шит -->
+      <div class="evpromo" id="evPromo" onclick="evPromoTap()"></div>
+      <!-- баннер мини-игр (волна 20): вход в экран «Игры» вместо 6-го таба навигации -->
+      <div class="evpromo gamespromo" id="gamesPromo" onclick="gamesPromoTap()"></div>
+      <div class="tapzone" id="tapzone"><i class="ring3"></i><span id="tapArt"></span></div>
+      <div class="taphint" id="taphint"></div>
+      <div class="energy">
+        <div class="bar"><i id="enbar" style="width:100%"></i></div>
+        <div class="row">
+          <span class="l" id="enLabel"></span> <b id="en">0</b> <span class="mx" id="enMax"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="v-cards">
+    <div class="cardshead" id="cardsTitle"></div>
+    <div class="income" id="income"></div>
+    <button class="codechip" id="codechip" onclick="S.funnelSource='card';openCode()"></button>
+    <div class="grid" id="grid"></div>
+    <div class="devnote" id="cardsNote"></div>
+  </section>
+
+  <section class="view" id="v-war"></section>
+
+  <section class="view" id="v-tasks">
+    <div class="cardshead" id="tasksTitle"></div>
+    <div id="comboBlock"></div>
+    <div class="tasks" id="tasks"></div>
+    <div class="devnote" id="tasksNote"></div>
+  </section>
+
+  <section class="view" id="v-top">
+    <div class="cardshead" id="topTitle"></div>
+    <div class="seg" id="lbTabs"></div>
+    <div class="tstrip" id="h2h"></div>
+    <div id="lbrows"></div>
+    <div class="banner" id="banner" onclick="openStore('banner')"></div>
+  </section>
+
+  <section class="view" id="v-games">
+    <div class="cardshead ghead"><button class="gback" onclick="navTo('v-tap')" aria-label="назад в штаб"><svg width="9" height="16" viewBox="0 0 9 16" fill="none"><path d="M8 1 1.5 8 8 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><span id="gamesTitle"></span></div>
+    <div class="teaser" id="gamesTeaser"></div>
+    <div class="ggrid" id="ggrid"></div>
+  </section>
+</main>
+</div><!-- /appscroll -->
+
+<nav id="nav"></nav>
+
+<div class="iosdlg" id="linkDlg"></div>
+<div class="safari" id="safari"></div>
+<div class="store" id="store"></div>
+<div class="intro" id="intro">
+  <div class="islides" id="islides"></div>
+  <div class="ifoot">
+    <div class="dots" id="introDots"></div>
+    <button class="nextbtn btnp" id="introNext" onclick="introNext()"></button>
+    <button class="iskip" id="introSkip" onclick="introFinish()"></button>
+  </div>
+</div>
+<div class="onb" id="onb">
+  <div class="g1"></div><div class="g2"></div>
+  <div class="slides" id="slides"></div>
+  <div class="onbfoot">
+    <div class="dots" id="onbDots"></div>
+    <button class="nextbtn btnp" id="onbNext" onclick="onbNext()"></button>
+  </div>
+</div>
+
+<!-- приложение ВПН (Figma волна 8): главный экран вкл/выкл; контент — CONFIG.vpnApp -->
+<div class="vapp" id="vapp"></div>
+<!-- шторка «У ВАС ЕСТЬ ПОДАРОК!» — промокод выдаётся ПОСЛЕ включения ВПН -->
+<div class="modal" id="giftM"></div>
+
+<div class="modal" id="codeM"></div>
+<div class="modal" id="unlockM"></div>
+<!-- всплывашка карточки (волна 9): контент собирает openCardPop() -->
+<div class="modal" id="cardM"></div>
+<!-- idle-событие (волна 10): оффер через 60с бездействия по воронке -->
+<div class="modal" id="eventM"></div>
+<div class="modal" id="eventOkM"></div>
+
+<!-- оверлей играбельных мини-игр (контент генерится из CONFIG.minigames) -->
+<div class="mgview" id="mgview"></div>
+
+<!-- FTUE-коуч: палец + подсказка + «Пропустить» (тексты — CONFIG.tutorial) -->
+<div class="coach off" id="coach">
+  <div class="coachPtr" id="coachPtr"></div>
+  <div class="coachTxt" id="coachTxt"></div>
+  <button class="coachSkip" id="coachSkip" onclick="tutSkip()"></button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+</div><!-- /stage -->
+
+<script>
+/* сцена 390×844 (волна 19): безразмерный скейл кадра под реальный экран.
+   Считаем в JS: CSS min(calc(100vw/390),…) даёт length, а scale() требует число. */
+function fitStage(){
+  document.documentElement.style.setProperty('--sc',
+    Math.min(window.innerWidth / 390, window.innerHeight / 844));
+}
+fitStage();
+window.addEventListener('resize', fitStage);
+window.addEventListener('orientationchange', fitStage);
+
+/* ============================================================
+   ART — ЕДИНАЯ КАРТА АРТА (точка рескина для Миши)
+   Ключ = строка: эмодзи или инлайн-SVG. Любую можно заменить на
+   '<img src="..." style="width:1em">' — рендер везде идёт отсюда.
+   Ключи:
+     chip                значок валюты «байты» (микросхема)
+     poster_rkn/vpn      постеры экрана выбора лагеря
+     tap_rkn/vpn         объект тапа, кадр «покой»
+     tap_rkn_hit/vpn_hit кадр «удар» (сейчас = покой, слот под арт)
+     imba_rkn/vpn        иконки имба-карт · boss  рейд-босс
+     store_* / onb* / vpn_*  стор и приложение ВПН (волна 8) · card_*  иконки карт
+     game_*  плитки таба «Игры» · mg_cap_*  плитки капчи
+     rt1..rt7 / rt_me  аватары топа «Рейтинг»
+   Палитры лагерей — CSS-переменные --rkn / --vpn в :root.
+============================================================ */
+const IMG = p => '<img src="assets/dist/' + p + '" alt="">';   // хелпер: ассет из Figma
+const ART = {
+  chip: IMG('icon-chip.svg'),                    // валюта «байты»
+  avatar: IMG('avatar-206408.webp'),              // аватар игрока в шапке
+  alert: IMG('badge-alert.svg'),                 // иконка инфо-пилюли выбора стороны
+  lock: IMG('lock-keyhole.svg'),                 // замок LOCKED / крючка имбы
+  gift: IMG('icon-gift.svg'),                    // бонус-пилюля в шторке успеха
+  award: IMG('icon-award.svg'),                  // призовой пул («Битва») + награда комбо («Задания»)
+  users: IMG('icon-users.svg'),                  // рефералка («Битва команд»)
+  lb1: IMG('lb-avatar-1.webp'), lb2: IMG('lb-avatar-2.webp'), lb3: IMG('lb-avatar-3.webp'),
+  combo1: IMG('combo-slot-1-52885a.webp'), combo2: IMG('combo-slot-2-2f67e1.webp'),  // слоты комбо
+  ti_send: IMG('icon-send.svg'), ti_twitter: IMG('icon-twitter.svg'),              // иконки миссий
+  ti_comment: IMG('icon-comment.svg'), ti_twitch: IMG('icon-twitch.svg'),
+  /* иконки навигации — инлайн-svg Миши с stroke=currentColor (красятся цветом лагеря;
+     файлы в assets/figma/icon-*.svg те же, но в них зашиты свои цвета) */
+  nav_home:'<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13.75 19.2497V11.9163C13.75 11.6732 13.6534 11.4401 13.4815 11.2682C13.3096 11.0963 13.0764 10.9997 12.8333 10.9997H9.16667C8.92355 10.9997 8.69039 11.0963 8.51849 11.2682C8.34658 11.4401 8.25 11.6732 8.25 11.9163V19.2497M2.75 9.16678C2.74994 8.90009 2.80806 8.6366 2.92031 8.39469C3.03255 8.15277 3.19623 7.93826 3.39992 7.76611L9.81658 2.26611C10.1475 1.98645 10.5667 1.83301 11 1.83301C11.4333 1.83301 11.8525 1.98645 12.1834 2.26611L18.6001 7.76611C18.8038 7.93826 18.9674 8.15277 19.0797 8.39469C19.1919 8.6366 19.2501 8.90009 19.25 9.16678V17.4168C19.25 17.903 19.0568 18.3693 18.713 18.7131C18.3692 19.057 17.9029 19.2501 17.4167 19.2501H4.58333C4.0971 19.2501 3.63079 19.057 3.28697 18.7131C2.94315 18.3693 2.75 17.903 2.75 17.4168V9.16678Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  nav_cards:'<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.0006 12.8339V16.5008M7.33427 12.8339H14.6669M12.9914 1.83301C13.4775 1.83311 13.9437 2.02635 14.2874 2.37022L17.7961 5.8795C18.1399 6.22326 18.3331 6.68954 18.3332 7.17577V18.3343C18.3332 18.8206 18.14 19.287 17.7963 19.6308C17.4525 19.9746 16.9862 20.1678 16.5 20.1678H5.50112C5.01494 20.1678 4.54867 19.9746 4.20489 19.6308C3.8611 19.287 3.66797 18.8206 3.66797 18.3343V3.66649C3.66797 3.18022 3.8611 2.71387 4.20489 2.37002C4.54867 2.02618 5.01494 1.83301 5.50112 1.83301H12.9914ZM8.25084 9.16693H13.7503C14.2565 9.16693 14.6669 9.57737 14.6669 10.0837V15.5841C14.6669 16.0904 14.2565 16.5008 13.7503 16.5008H8.25084C7.74463 16.5008 7.33427 16.0904 7.33427 15.5841V10.0837C7.33427 9.57737 7.74463 9.16693 8.25084 9.16693Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  nav_war:'<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13.2917 16.0417L2.75 5.5V2.75H5.5L16.0417 13.2917M11.9167 17.4167L17.4167 11.9167M14.6667 14.6667L18.3333 18.3333M17.4167 19.25L19.25 17.4167M13.2917 5.95833L16.5 2.75H19.25V5.5L16.0417 8.70833M4.58333 12.8333L8.25 16.5M6.41667 15.5833L3.66667 18.3333M2.75 17.4167L4.58333 19.25" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  nav_tasks:'<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.6667 4.58301H2.75M14.6667 10.9997H2.75M10.0833 17.4163H2.75M13.75 16.4997L15.5833 18.333L19.25 14.6663" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  nav_top:'<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.16595 13.4391V14.9297C9.16249 15.2438 9.07839 15.5517 8.92171 15.824C8.76504 16.0962 8.54105 16.3237 8.27121 16.4845C7.69838 16.9088 7.2324 17.4608 6.9103 18.0967C6.5882 18.7327 6.41886 19.4349 6.41573 20.1478M12.8329 13.4391V14.9297C12.8364 15.2438 12.9205 15.5517 13.0771 15.824C13.2338 16.0962 13.4578 16.3237 13.7277 16.4845C14.3005 16.9088 14.7665 17.4608 15.0886 18.0967C15.4107 18.7327 15.58 19.4349 15.5831 20.1478M16.4999 8.25019H17.875C18.4828 8.25019 19.0658 8.00873 19.4956 7.57892C19.9254 7.14912 20.1668 6.56617 20.1668 5.95834C20.1668 5.3505 19.9254 4.76756 19.4956 4.33776C19.0658 3.90795 18.4828 3.66649 17.875 3.66649H16.4999M16.4999 8.25019C16.4999 9.709 15.9204 11.1081 14.8888 12.1396C13.8573 13.1711 12.4582 13.7506 10.9994 13.7506C9.54062 13.7506 8.14157 13.1711 7.11003 12.1396C6.0785 11.1081 5.49899 9.709 5.49899 8.25019M16.4999 8.25019V2.74975C16.4999 2.50661 16.4033 2.27344 16.2314 2.10151C16.0594 1.92959 15.8263 1.83301 15.5831 1.83301H6.41573C6.1726 1.83301 5.93942 1.92959 5.7675 2.10151C5.59558 2.27344 5.49899 2.50661 5.49899 2.74975V8.25019M5.49899 8.25019H4.12388C3.51604 8.25019 2.9331 8.00873 2.5033 7.57892C2.07349 7.14912 1.83203 6.56617 1.83203 5.95834C1.83203 5.3505 2.07349 4.76756 2.5033 4.33776C2.9331 3.90795 3.51604 3.66649 4.12388 3.66649H5.49899M3.66551 20.1678H18.3334" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  /* персонажи экрана выбора (Figma волна 7): нейтральные + «выбранные» варианты */
+  poster_rkn:IMG('char-rkn-neu-2285a2.webp'), poster_vpn:IMG('char-vpn-neu-7ea36b.webp'),
+  poster_rkn_sel:IMG('char-rkn-sel-74d4aa.webp'), poster_vpn_sel:IMG('char-vpn-sel-c7cbf.webp'),
+  /* тап-объекты штаба (Figma волна 9: фреймы 4/5 — один лист, два кропа) */
+  tap_rkn:IMG('tap-rkn-5dcdf5.webp'), tap_rkn_hit:IMG('tap-rkn-5dcdf5.webp'),
+  tap_vpn:IMG('tap-vpn-37dbed.webp'), tap_vpn_hit:IMG('tap-vpn-37dbed.webp'),
+  /* аватар шапки = персонаж команды (Figma волна 9; реюз кропов волны 7) */
+  avatar_vpn:IMG('char-vpn-sel-c7cbf.webp'), avatar_rkn:IMG('char-rkn-sel-74d4aa.webp'),
+  /* легендарные карты — новый арт Миши (волна 9: фреймы 6/7) */
+  imba_rkn:IMG('gen/gen-imba-rkn-band.webp'), imba_vpn:IMG('gen/gen-imba-vpn-band.webp'),  /* легендарки в едином gen-стиле 22.08; мишины мастера на диске */
+  /* арты idle-события (Миша, волна 10; ОБНОВЛЕНИЕ 20.08 вечер: 124:21781 Дугин
+     против дата-центра ВПН / 124:20791 Дудь против Firewall РКН; -v2 = новые imageRef,
+     старые файлы удалены) */
+  event_vpn:IMG('event-vpn-dugin-v2.webp'), event_rkn:IMG('event-rkn-dud-v2.webp'),
+  /* баннер события на штабе (Миша, фрейм 2010 = 164:13240): вырезной Дугин с лазерами
+     (image 2108-Photoroom); у РКН своего кропа нет — реюз event_rkn с фейд-маской */
+  evb_vpn:IMG('event-banner-dugin-w14.webp'),
+  evb_go:'<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.9 7h8.2M7.3 3.4 10.9 7l-3.6 3.6" stroke="#fff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  xclose:IMG('icon-x.svg'),
+  /* замок крючка имбы — в рендере фрейма 108:19009 он золотой (файл lock-keyhole.svg белый) */
+  lock_gold:'<svg width="16" height="16" viewBox="0 0 12 12" fill="none"><path d="M3.5 5V3.5C3.5 2.837 3.763 2.201 4.232 1.732C4.701 1.263 5.337 1 6 1C6.663 1 7.299 1.263 7.768 1.732C8.237 2.201 8.5 2.837 8.5 3.5V5M6.5 8C6.5 8.276 6.276 8.5 6 8.5C5.724 8.5 5.5 8.276 5.5 8C5.5 7.724 5.724 7.5 6 7.5C6.276 7.5 6.5 7.724 6.5 8ZM2.5 5H9.5C10.052 5 10.5 5.448 10.5 6V10C10.5 10.553 10.052 11 9.5 11H2.5C1.948 11 1.5 10.553 1.5 10V6C1.5 5.448 1.948 5 2.5 5Z" stroke="#FFD700" stroke-width="2" stroke-linecap="round"/></svg>',
+  boss:'🦸',
+  /* стор + приложение ВПН (Figma волна 8) */
+  saf_page:IMG('safari-apple-page-w13.webp'),   // страница apple.com в Safari (кроп image-слоя фрейма 148:8598)
+  saf_status:IMG('saf-status-w18.svg'),         // статус-бар фрейма 148:8598 (9:41 + уровни) — SVG-экспорт слоя
+  saf_bar:IMG('saf-bottom-w18.svg'),            // нижний бар Safari (адрес + иконки + тень) — SVG-экспорт слоя
+  store_icon:IMG('store-app-icon.webp'),
+  store_shot_off:IMG('store-shot-off.webp'), store_shot_on:IMG('store-shot-on.webp'),
+  /* герои интро-онбординга игры (волна 13: запечённые кропы фреймов 148:8655..8711) */
+  intro1:IMG('onb-intro-1-w15.webp'), intro2:IMG('onb-intro-2-w15.webp'),
+  intro3:IMG('onb-intro-3-w15.webp'), intro4:IMG('onb-intro-4-w15.webp'),
+  intro5:IMG('onb-intro-5-w15.webp'),
+  onb1:IMG('onb-hero-1-w11.webp'), onb2:IMG('onb-hero-2-w11.webp'),
+  onb3:IMG('onb-hero-3-w11.webp'), onb4:IMG('onb-hero-4-w11.webp'),
+  onb2_deco:IMG('onb-logos-w11.svg'),
+  vpn_power:IMG('vpn-power.svg'), vpn_menu:IMG('vpn-menu.svg'), vpn_settings:IMG('vpn-settings.svg'),
+  vpn_globe:IMG('vpn-globe.svg'), vpn_dl:IMG('vpn-arrow-down.svg'), vpn_ul:IMG('vpn-arrow-up.svg'),
+  vpn_chev:IMG('vpn-chevron.svg'),
+  /* синий замок наград миссий (фрейм 18: замок в цвет РКН-синего) */
+  lock_blue:'<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3.5 5V3.5C3.5 2.837 3.763 2.201 4.232 1.732C4.701 1.263 5.337 1 6 1C6.663 1 7.299 1.263 7.768 1.732C8.237 2.201 8.5 2.837 8.5 3.5V5M6.5 8C6.5 8.276 6.276 8.5 6 8.5C5.724 8.5 5.5 8.276 5.5 8C5.5 7.724 5.724 7.5 6 7.5C6.276 7.5 6.5 7.724 6.5 8ZM2.5 5H9.5C10.052 5 10.5 5.448 10.5 6V10C10.5 10.553 10.052 11 9.5 11H2.5C1.948 11 1.5 10.553 1.5 10V6C1.5 5.448 1.948 5 2.5 5Z" stroke="#1B72ED" stroke-width="2" stroke-linecap="round"/></svg>',
+  /* тумбы карт. РКН — реальный арт Figma (волна 5); у card_yarovaya макета нет —
+     временно реюз тумбы ВПН. У двух карт ВПН (babushka/sarafan) свой арт ещё не нарисован */
+  card_reestr:IMG('gen/gen-reestr-band.webp'), card_shtraf:IMG('gen/gen-shtraf-band.webp'),
+  card_zamedlitel:IMG('gen/gen-tiski-band.webp'), card_whitelist:IMG('gen/gen-whitelist-band.webp'),
+  card_yarovaya:IMG('gen/gen-yarovoy-band.webp'),      /* генерация 20.08 (утв. Павлом), Миша может заменить;
+     все gen-* тумбы — кропы мастеров в банд-аспект, параметры per-карта: tools/crop-gen-cards.py (волна 16) */
+  card_tspu:IMG('gen/gen-glushilki-band.webp'),
+  card_aura:IMG('gen/gen-aura-band.webp'),
+  card_liga:IMG('gen/gen-liga-band.webp'), card_golub:IMG('gen/gen-golub-band.webp'), card_proxytg:IMG('gen/gen-proxytg-band.webp'),  /* новые карты 22.08 */
+  card_goskanaly:IMG('gen/gen-goskanaly-band.webp'),       /* генерация 22.08 (единый стиль) */
+  card_transh:IMG('gen/gen-transh-band.webp'),         /* генерация 20.08, Миша может заменить */
+  card_babushka:IMG('gen/gen-babushka-band.webp'), card_sarafan:IMG('gen/gen-sarafan-band.webp'),  /* генерация 20.08 */
+  card_mosty:IMG('gen/gen-mosty-band.webp'), card_obfusk:IMG('gen/gen-otmychka-band.webp'),
+  card_zerkala:IMG('gen/gen-zerkala-band.webp'), card_routing:IMG('gen/gen-kontrabanda-band.webp'),  /* генерация 20.08 */
+  card_server:IMG('gen/gen-server-band.webp'),         /* генерация 20.08 */
+  card_samouchka:IMG('gen/gen-samouchka-band.webp'), card_drug:IMG('gen/gen-drug-band.webp'),  /* генерация 20.08 */
+  /* иконка геймпада (экс-таб «Игры»; с волны 20 в навигации не живёт, оставлена про запас) */
+  nav_games:'<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 6V9V16C2.5 17 3.5 18 4.5 18H7.5C8.5 18 9.5 15 9.5 14H12.5C12.5 15 13.5 18 14.5 18H17.5C18.5 18 19.5 17 19.5 16V9V6C19.5 5 18.5 4 17.5 4H4.5C3.5 4 2.5 5 2.5 6Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="7.5" cy="9" r="1.5" fill="currentColor"/><circle cx="14.5" cy="9" r="1.5" fill="currentColor"/></svg>',
+  /* плитки таба «Игры» (Figma, волна 6) */
+  game_cipher:IMG('game-cipher.webp'), game_captcha:IMG('game-captcha.webp'),
+  game_ddos:IMG('game-ddos.webp'), game_packets:IMG('game-packets.webp'),
+  game_runner:IMG('game-runner.webp'), game_bots:IMG('game-bots.webp'),
+  /* капча: «правильные» и «ложные» плитки по лагерям (ВПН ищет зеркала, РКН — запрещёнку) */
+  mg_cap_good_vpn:'🌐', mg_cap_bad_vpn:'🚫',
+  mg_cap_good_rkn:'🕳', mg_cap_bad_rkn:'📺',
+  tut_pointer:'👇',   /* палец FTUE-коуча */
+  /* аватары топа «Рейтинг» (Figma, волна 5) — rt1..rt7 по порядку строк, rt_me — своя строка */
+  rt1:IMG('rt-avatar-1.webp'), rt2:IMG('rt-avatar-2.webp'), rt3:IMG('rt-avatar-3.webp'),
+  rt4:IMG('rt-avatar-4.webp'), rt5:IMG('rt-avatar-5.webp'), rt6:IMG('rt-avatar-6.webp'),
+  rt7:IMG('rt-avatar-7.webp'), rt_me:IMG('rt-avatar-me.webp'),
+  chev:IMG('icon-chevron.svg'),   /* шеврон баннера-воронки в «Рейтинге» */
+};
+
+const APP_NAME = 'ТУННЕЛЬ'; // рабочее имя ВПН — слой под замену (используется по всему CONFIG)
+
+/* ============================================================
+   CONFIG — ВЕСЬ настраиваемый контент прототипа в одном блоке.
+   economy  — числа экономики (подогнаны под 2-минутное демо);
+   camps    — лагеря: названия, постеры, тексты тапа, метки-крючки;
+   cards    — пулы карт по лагерям (имя, цена, доход/час, арт, уровень);
+   store / onboarding / codeEntry / unlock — воронка (фейк-стор → УТП → промокод → имба);
+   war / tasks / minigames / leaderboard / nav / text — остальные экраны и строки.
+   Перенастройка цен или переименование приложения = правка ТОЛЬКО здесь.
+============================================================ */
+const CONFIG = {
+  app: { name: APP_NAME, promo: 'TUNNEL-X2-2026' },
+
+  economy: {
+    tapBase: 1,          // байтов за тап без множителя
+    campMult: 2,         // множитель своего лагеря (×2)
+    energyMax: 1000, energyRegen: 0.5, // энергия: объём и +в секунду (0.5/с = 1 ед. раз в 2с, слово Павла 20.08)
+    welcomeBonus: 100,   // байтов за выбор лагеря
+    comboReward: 10000,  // ежедневное комбо
+    codeBonus: 5000,     // байтов за ввод промокода
+    /* лестница уровней карт (заказ Павла 20.08): каждая покупка = +1 уровень до maxLvl.
+       Уровень 1 = базовые цена/доход карты, поэтому 2-мин воронка не сдвигается;
+       цена уровня N+1 = base×priceMult^N (растёт быстрее дохода — в демо путь «новая карта» дешевле),
+       доход карты = базовый pph × уровень. Имба апгрейдится после разлока от imbaUpBase. */
+    ladder: { maxLvl: 10, priceMult: 1.5, imbaUpBase: 2000,
+      /* лок цепочки (правка Саши 21.08): карта N доступна после уровня ≥1 у карты N-1
+         по списку («тупая зависимость», имба вне цепочки — у неё свой ВПН-разлок) */
+      chainLock: true },
+    buyDelayMs: 700,   // фейк-запрос на сервер при прокачке (правка Саши 21.08, как в Хомяке)
+  },
+
+  camps: {
+    rkn: { label:'РКН', poster:'poster_rkn', badge:'ПОРЯДОК', team:'Команда РКН',
+      warWord:'Порядок',   /* = девиз команды с экрана выбора (правка Павла 20.08) */
+      posterDesc:'глушилки, белые списки, порядок. Нас мало, но у нас рубильник',
+      taphint:'тап по пульту глушилок — <b>+{tap} байта</b> (×{mult} команды)',
+      mark:'×2 С VPN ПАРТНЁРА' },   /* бейдж меченой; подача Миши, «наш» снят по слову Павла */
+    vpn: { label:'ВПН', poster:'poster_vpn', badge:'СВОБОДА', team:'Команда ВПН',
+      warWord:'Свобода',
+      posterDesc:'туннели, обход, свобода. Нас много, и мы уже прокопались',
+      taphint:'тап по серверу-туннелю — <b>+{tap} байта</b> (×{mult} команды)',
+      mark:'×2 С VPN ПАРТНЁРА' },
+  },
+
+  player: { name:'Anonym_88' },   // ник Миши (вердикт Павла 22.08); замени на реальный при интеграции
+
+  /* buy-once; цены: дешёвые — в первую минуту, меченая (~500) — к 60–80 c,
+     имба ×10 сильнее лучшей и залочена до установки ВПН (~90 c) */
+  cards: {   /* нейминг утверждён Павлом 20.08 (9 обычных + легендарная на команду);
+     ds — описание для всплывашки; лесенка цен/дохода продолжена по прежней прогрессии */
+    rkn: [
+      {nm:'Реестр запрещёнки',    art:'card_reestr',     price:50,  pph:1800,
+       ds:'База всего, что нельзя. Пополняется быстрее, чем читается.'},
+      {nm:'Штраф за VPN-рекламу', art:'card_shtraf',     price:90,  pph:3600,
+       ds:'Рублём по рекламе обходов: каждый пост — квитанция.'},
+      {nm:'Тиски для YouTube',    art:'card_zamedlitel', price:140, pph:5400,
+       ds:'Ролики грузятся со скоростью бюрократии. Терпение — тоже контроль.'},
+      {nm:'Белые списки 2.0',     art:'card_whitelist',  price:200, pph:7200,
+       ds:'Перечень доверенных сайтов и сервисов, доступ к которым сохраняется при блокировках.'},
+      {nm:'Пакет Яровой',         art:'card_yarovaya',   price:350, pph:10800,
+       ds:'Всё записывается и хранится. На всякий случай. Навсегда.'},
+      {nm:'Ферма глушилок',       art:'card_tspu',       price:500, pph:14400, marked:true,
+       ds:'Железо на магистралях: фильтрует трафик прямо на трубе.'},
+      {nm:'Аура Мизулиной',       art:'card_aura',       price:800, pph:18000,
+       ds:'Поле нравственной защиты: подозрительный трафик краснеет и сдаётся сам.'},
+      {nm:'Продвижение на госканалах', art:'card_goskanaly', price:1200, pph:21600,
+       ds:'Прайм-тайм каждый вечер объясняет, почему без VPN спокойнее.'},
+      {nm:'Транш из бюджета',   /* имя утверждено Павлом 20.08 */     art:'card_transh',     price:1800, pph:25200,
+       ds:'Освоено. Работы ведутся. Сроки уточняются.'},
+      {nm:'Лига Безопасности Интернета', art:'card_liga', price:2700, pph:28800,
+        desc:'Общественный надзор: каждый сайт проверен, проштампован и одобрен.',
+        chainLock: true },
+      {nm:'Знай противника в лицо', art:'imba_rkn',      price:0,   pph:180000, imba:true,
+       ds:'Изучи инструменты обхода изнутри — и блокируй на упреждение.'},
+    ],
+    vpn: [
+      {nm:'Бабушкин роутер',      art:'card_babushka',   price:50,  pph:1800,
+       ds:'Стоит за фикусом и раздаёт свободу всему подъезду.'},
+      {nm:'Сарафан',              art:'card_sarafan',    price:90,  pph:3600,
+       ds:'Лучший канал распространения: сосед рассказал соседу.'},
+      {nm:'Мосты',                art:'card_mosty',      price:140, pph:5400,
+       ds:'Тихие входы в сеть, о которых не пишут в реестрах.'},
+      {nm:'Отмычка от Рунета',    art:'card_obfusk',     price:200, pph:7200,
+       ds:'Трафик притворяется скучным — фильтры зевают и пропускают.'},
+      {nm:'Зеркала',              art:'card_zerkala',    price:350, pph:10800,
+       ds:'Заблокировали одно — открылись три. Классика жанра.'},
+      {nm:'Контрабанда трафика',  art:'card_routing',    price:500, pph:14400, marked:true,
+       ds:'Провозит байты мимо постов досмотра. Декларировать нечего.'},
+      {nm:'Сервер за бугром',     art:'card_server',     price:800, pph:18000,
+       ds:'Гудит в далёком дата-центре и не читает реестров.'},
+      {nm:'Самоучка с телеграм-ботом', art:'card_samouchka', price:1200, pph:21600,
+       ds:'Собрал бота за вечер — теперь у всего чата есть выход.'},
+      {nm:'Прокси в телеге',      art:'card_proxytg',    price:1800, pph:25200,
+        desc:'Ссылка из чата — и мессенджер снова дышит. Даже бабушка справится.',
+        chainLock: true },
+      {nm:'Голубиная почта',      art:'card_golub',      price:2700, pph:28800,
+        desc:'Аналоговый канал последней надежды. Не глушится ничем, кроме кота.',
+        chainLock: true },
+      {nm:'Друг-айтишник',        art:'card_drug',       price:4000, pph:32400,
+       ds:'Тот самый друг: «щас настрою». И ведь настроил.'},
+      {nm:'Улучши свою систему', art:'imba_vpn',        price:0,   pph:180000, imba:true,   /* имя — мишино (вердикт Павла 22.08 поздний вечер, «1 — мишино») */
+       ds:'Экспериментальный туннель: пробивает даже белые списки.'},
+    ],
+  },
+
+  /* интро-онбординг игры — 5 слайдов ПИКСЕЛЬ-ПЕРФЕКТ по Figma волна 15
+     (148:8655, 169:13643/13741/13870, 148:8711 — арты Миши 20.08 поверх волны 13).
+     art — запечённый герой слайда (сцена/мокапы + панели, верх фрейма 390×580);
+     последний CTA «Выбрать сторону» ведёт на экран выбора, «Пропустить» — то же */
+  introOnboarding: {
+    enabled:true,
+    nextLabel:'Далее', finalLabel:'Выбрать сторону', skipLabel:'Пропустить',
+    slides:[
+      {art:'intro1', h:'Выбирай сторону противостояния'},
+      {art:'intro2', h:'Тапай и качай\nкарточки'},   /* перенос как в рендере Figma */
+      {art:'intro3', h:'Участвуй в событиях и битвах между командами'},
+      {art:'intro4', h:'Поднимайся\nв рейтингах'},   /* перенос из макета (фрейм 4) */
+      {art:'intro5', h:'Получай бонусы в других сервисах'},
+    ],
+  },
+
+  /* переход игра→стор (волна 13, Figma 160:12487 + 148:8598): системный «Открыть
+     ссылку?» в игре → Safari со страницей apps.apple.com → вопрос про App Store → стор */
+  linkDialog: {
+    title:'Открыть ссылку?',
+    url:'https://apps.apple.com/ru/app/tunnel-vpn/id6745120943',   /* декоративный id (не реальное прило) */
+    cancelLabel:'Отмена', openLabel:'Открыть',
+  },
+  safari: {
+    /* время 9:41 и адрес «https://apps.apple.com › app» запечены в SVG хрома фрейма
+       (saf-status-w18/saf-bottom-w18) — тут только живой диалог */
+    dialogText:'Открыть эту страницу в приложении App Store?',
+    cancelLabel:'Отменить', openLabel:'Открыть',
+    dialogDelayMs:700,     // страница «догрузилась» → системный вопрос
+  },
+
+  /* app-switch переходы между «прилами» (игра/Safari/стор/ВПН): длительность и кривая */
+  transitions: { ms:420, ease:'cubic-bezier(.32,.72,.33,1)' },
+
+  campSelect: {
+    showSub:false, showInfo:false,   // Павел 20.08: подзаголовок и инфо-плашку скрыть (вернуть = true)           // тексты — экран «ВЫБЕРИ СТОРОНУ» (Figma волна 7)
+    title:'ВЫБЕРИ СТОРОНУ',
+    sub:'Твой выбор определит на чьей стороне ты будешь трудиться',
+    infoLines:['• ×{mult} байтов за свою команду', '• Можно сменить сторону позже'],
+    continueLabel:'Продолжить',   // в Figma КАПСОМ — капс делает CSS
+    vs:'VS',
+  },
+
+  /* FTUE-обучение: коуч сразу после «Продолжить» — тапы → карты → первая покупка.
+     Состояние ТОЛЬКО в памяти (без localStorage — перезагрузка = чистый прогон демо,
+     так задумано). tapBoost: обучающие тапы дают ×10 → 5 тапов = 100 байтов, первая
+     карта (50) доступна сразу. Скип виден на каждом шаге. */
+  tutorial: {
+    enabled:true,
+    tapGoal:5,          // сколько обучающих тапов
+    tapBoost:10,        // множитель байтов на обучающих тапах (5 × 2 × 10 = 100)
+    tapText:'Тапни {goal} раз',
+    counter:'{done} / {goal}',
+    buyText:'Купи первую карту',
+    praiseToast:'Доход пошёл. Дальше сам',
+    skipLabel:'Пропустить',
+  },
+
+  /* фейк-стор = страница App Store (Figma волна 8, светлая); «Acme, Inc» из макета
+     заменён нашим дев-именем */
+  store: {
+    title:'Туннель', tagline:'VPN & прокси', dev:'Tunnel Labs',
+    getLabel:'Загрузить', installingLabel:'Загрузка…', openLabel:'Открыть',
+    ratingLabel:'ОЦЕНОК: 323', rating:'5.0', stars:'★★★★★',
+    ageLabel:'ВОЗРАСТ', age:'12+', ageSub:'лет (г.)',
+    chartLabel:'РЕЙТИНГ', chartNo:'No.', chartPos:'1', chartSub:'Утилиты',
+    devLabel:'РАЗРАБОТЧИК',
+    tabs:['Сегодня','Игры','Приложения','Arcade'],
+    time:'9:41',
+  },
+
+  /* УТП-онбординг первого запуска приложения — 4 слайда, ПИКСЕЛЬ-ПЕРФЕКТ по Figma
+     (волна 11: 103:16195/16272/16301/16318). img/deco — точная геометрия арт-слоёв
+     (проценты слайда 390×683: left/width от 390, top от 683).
+     Финальный промо-слайд УДАЛЁН: промокод переехал в шторку подарка (после включения ВПН) */
+  onboarding: {
+    nextLabel:'Далее',
+    slides:[
+      {art:'onb1', img:'left:5.9%;top:8.49%;width:87.95%',            /* [23,58 343×328] */
+       h:'Пробивает\nбелые списки',
+       p:'Преодолевай глухие заслоны блокировок. Твой трафик неуязвим для кремниевых фильтров РКН.'},
+      {art:'onb2', img:'left:2.31%;top:9.37%;width:95.38%',           /* [9,64 372×221] */
+       deco:'onb2_deco', decoPos:'left:11.28%;top:43.19%;width:77.18%', /* лого-сетка [44,295 301×85] op.6 */
+       h:'Российские сервисы работают напрямую',
+       p:'Трафик идет в обход ограничений без лишних задержек и лагов'},
+      {art:'onb3', img:'left:6.15%;top:8.05%;width:86.92%',           /* [24,55 339×325] */
+       h:'До 200 Мбит\nскорость',
+       p:'Массивные турбо-сервера гарантируют мгновенную загрузку байтов'},
+      {art:'onb4', img:'left:6.15%;top:8.05%;width:86.92%',
+       h:'YouTube\nбез рекламы',
+       p:'Чистый поток контента без пауз и замедления трафика. Смотри любимые шоу на максималках'},
+    ],
+  },
+
+  /* приложение ВПН (Figma волна 8): главный экран вкл/выкл */
+  vpnApp: {
+    title:APP_NAME + ' VPN',
+    offStatus:'НЕ ПОДКЛЮЧЕН', onStatus:'ПОДКЛЮЧЁН',
+    offHint:'Нажмите для подключения', onHint:'Нажмите для отключения',
+    ipLabel:'Ваш реальный IP', ip:'192.168.1.108',
+    dlLabel:'Загрузка', ulLabel:'Отдача',
+    offSpeed:'0.0 Кб/с', onDl:'12.4 Кб/с', onUl:'3.2 Кб/с',
+    flag:'🇩🇪', country:'Германия', server:'Берлин — Оптимальный пинг',
+    giftDelayMs:900,     // пауза от включения ВПН до шторки подарка
+  },
+
+  /* шторка подарка (в приложении, ПОСЛЕ включения ВПН — новая логика флоу, слово Павла) */
+  giftSheet: {
+    title:'У ВАС ЕСТЬ ПОДАРОК!',
+    sub:'Активируйте эксклюзивный бонус в своей игровой команде прямо сейчас',
+    promoLabel:'ЛИМИТИРОВАННЫЙ ПРОМОКОД',
+    copyLabel:'Скопировать', copiedLabel:'Скопировано ✓',
+    captionA:'Введи код в игре — откроется ', captionB:'легендарная карточка',
+    ctaLabel:'Перейти и активировать',
+  },
+
+  codeEntry: {              // шторка «Активация промокода» (Figma, волны 2+8)
+    chipLabel:'🎟 Ввести промокод из ВПН',
+    title:'Активация промокода',
+    sub:'Введите полученный промокод',
+    placeholder:'XXXX-XX-XXXX',
+    prefill:true,           // код УЖЕ подставлен — упрощение демо (слово Павла, волна 8);
+                            // «Вставить» и ошибка остаются в коде, но вне демо-пути
+    pasteLabel:'Вставить',
+    submitLabel:'Применить', laterLabel:'позже',
+    errText:'Код не подходит. Проверь в приложении ' + APP_NAME + '.',
+  },
+
+  unlock: {                 // шторка успеха (Figma, волны 2+8)
+    eyebrow:'ПРОМОКОД АКТИВИРОВАН',
+    headline:'Легендарная карта у тебя!',   /* регистр и кегль — по фрейму 2008 (аудит 21.08) */
+    title:'Имба открыта!',
+    nameLine:'<b>{card}</b> — теперь твоя.',
+    gainPph:'х2 доход в час',                      /* вердикт Павла 22.08 (аудит-2 п.4): мишина подача без числа */
+    cardNote:'При использовании сервиса партнёра',   // подпись карточки (Figma волна 8, партнёрская подача)
+    gainBonus:'+{bonus} БАЙТОВ НА БАЛАНС!',
+    /* тизер Дугина: ответ Павла 22.08 — карточный флоу заканчивается ЧИСТЫМ разлоком
+       легендарки, без рейда (тизер и «Записаться в рейд» в шите разлока ВЫКЛ).
+       Рейд живёт только в событийной ветке (source='event'). true = вернуть тизер. */
+    showBossTeaser:false,
+    bossTitle:'Тизер: рейд-босс Дугин',
+    bossDesc:'Плащ. Полёт. Лазеры из глаз — жжёт серверы ВПН. Собери отряд команды и выстои волну.',
+    raidLabel:'Записаться в рейд', backLabel:'Продолжить',
+    raidStub:'⚔️ скоро: рейды (заглушка)',
+    closeToast:'доход ×10 — глянь «Битву»',
+  },
+
+  war: {                    // экран «Битва команд» (Figma, волна 2)
+    title:'Битва команд',
+    rknPct:52,                       // полоса: синие РКН слева
+    rknTotal:'5,21 млрд', vpnTotal:'4,79 млрд',
+    timerLabel:'До конца битвы',
+    endsIn:{d:2, h:13, m:22, s:41},  // отсчёт от загрузки страницы
+    prizePool:500000,                // призовой пул в байтах (баннер в карточке)
+    prizeLabel:'ТЕКУЩИЙ ПРИЗОВОЙ ПУЛ',
+    contribLabel:'Вклад команды:',
+    topTitle:'ТОП-ВКЛАДЧИКИ НЕДЕЛИ',
+    teamTags:{vpn:'VPN FORCE', rkn:'RKN GUARD'},
+    pool:'Призовой пул: <b>1 млрд байтов</b> + <b>500 промокодов ВПН × месяц</b>. Команда-победитель делит всё.',
+    myWeightLabel:'Твой вклад за неделю',
+    inviteLine:'Позвал друга — твой вклад в войну команд на этой неделе умножается на ×2!',
+    inviteBtn:'Пригласить',
+    inviteStub:'🤝 скоро: рефералка (заглушка)',
+  },
+
+  /* ежедневное комбо (Figma, волна 4): декоративный тизер из 3 слотов + баннер награды.
+     Кнопка сбора живая (прежний claimCombo, награда — economy.comboReward) */
+  combo: {
+    title:'ЕЖЕДНЕВНОЕ КОМБО',
+    refreshNote:'Обновится через 14ч',
+    slots:[
+      {art:'combo1', label:'Туннель VPN'},
+      {art:'combo2', label:'Прокси-сервер'},
+      {mystery:true, label:'???'},
+    ],
+    rewardLabel:'Награда',
+  },
+
+  tasks: {
+    title:'Задания',
+    sectionTitle:'СПЕЦОПЕРАЦИИ',
+    comboDone:'✓ собрано',
+    list:[   /* tic — иконка платформы из ART; тексты миссий = фрейм 18 Figma (волна 8) */
+      {k:'story',  tic:'ti_send',    nm:'Сторис в Телеге',      rw:'3 дня ВПН'},
+      {k:'post',   tic:'ti_twitter', nm:'Пост с #РКНпротивВПН', rw:'5 дней ВПН'},
+      {k:'comm',   tic:'ti_comment', nm:'Коммент с TG-id',      rw:'2 дня ВПН'},
+      {k:'twitch', tic:'ti_twitch',  nm:'Стрим 30 мин',         rw:'7 дней ВПН'},
+      {k:'group',  tic:'ti_send',    nm:'Вступи в группу',      rw:'1 день ВПН'},
+    ],
+    /* 4-статусная кнопка миссии (слово Павла, волна 8): Перейти → Проверить → На проверке → Выполнено.
+       «Перейти» симулирует уход в соцсеть (в демо — смена статуса), начисление — прежний тост */
+    btnGo:'Перейти', btnAvail:'Проверить', btnChecking:'На проверке', btnDone:'Выполнено ✓',
+    checkMs:3000, doneToast:'✓ начислено: {rw}',
+    note:'награда заданий — дни бесплатного ВПН · проверка тут фейковая (3 сек)',
+  },
+
+  /* всплывашка карточки (Figma волна 9, фрейм 108:20141): открывается тапом по карте
+     (кнопка на карте покупает сразу, без шита); внутри — своя кнопка улучшения.
+     Уровень/цена/доход — живые из лестницы (CONFIG.economy.ladder) */
+  cardPopup: {
+    lvlLabel:'Ур. {lvl}',
+    gainLabel:'+{pph}<span class="ph">/час</span>',
+    buyLabel:'Купить',
+    maxLabel:'MAX — прокачано',
+    chainLine:'Прокачайте предыдущую карточку для открытия',   // залоченный шит (фрейм 151:11340)
+  },
+
+  /* idle-событие (волна 10, тех-рельсы под арт Миши): если за delayMs игрок не тапнул
+     имбу и не заходил в стор — шит-оффер «Поучаствуй в событии». Один раз за сессию. */
+  idleEvent: {
+    enabled:true, delayMs:60000,
+    retryMs:15000,   // занят воронкой в момент таймера — попробовать позже, не сжигая показ
+    eyebrow:'Поучаствуй в событии',
+    titles:{ vpn:'Защита дата-центра', rkn:'Защита Firewall' },
+    arts:{ vpn:'event_vpn', rkn:'event_rkn' },
+    ctaLabel:'Участвовать',
+    hint:'Поставь VPN чтобы присоединиться',
+    /* промо-баннер события на штабе (волна 13; дизайн Миши — фрейм 2010 = 164:13240):
+       постоянный вход в тот же ивент-шит. У ВПН — вырезной арт из фрейма, у РКН
+       макета нет — реюз арта события с фейд-маской (та же композиция) */
+    promo:{ badge:'Событие', bannerArts:{ vpn:'evb_vpn', rkn:'event_rkn' } },
+  },
+
+  /* успех промокода при входе ИЗ СОБЫТИЯ (волна 11, спека Павла): игрок пришёл по
+     «Участвовать» — награда за промокод = регистрация в событии, а НЕ легендарка
+     (она остаётся locked, бонус не начисляется — игрок шёл не за ней).
+     Имя события — одно на систему, берётся из idleEvent.titles */
+  eventSuccess: {
+    eyebrow:'ПРОМОКОД АКТИВИРОВАН',
+    headline:'ТЫ ЗАПИСАН В СОБЫТИЕ!',
+    pill:'МЕСТО В СОСТАВЕ ЗАКРЕПЛЕНО',
+    regLine:'{team} внесла тебя в состав операции. Участие засчитано — жди сигнала к старту.',
+    okLabel:'Продолжить',
+    closeToast:'📡 ты в составе события — жди сигнала',
+  },
+
+  /* Мини-игры — свой таб «Игры» (Figma, волна 6): тизер «СКОРО» + сетка 2×3.
+     Плитки с game: — играбельные (без бейджа «СКОРО»), остальные 4 — тизеры.
+     ЭКОНОМИКА (волна 21, слово Павла 22.08): капча — разовые 40 байтов; шифр байтов не даёт,
+     вместо этого временный буст дохода ×(серия−1) на boostMins минут с перезарядкой час —
+     воронку не шорткатит, меченую карту (500) напрямую не оплачивает. */
+  minigames: {
+    title:'Мини-игры', soonBadge:'СКОРО',
+    /* баннер на штабе (волна 20): постоянный вход в экран игр (таб убран из навигации) */
+    promo:{ badge:'Мини-игры', title:'Взлом шифра и другие', art:'game_cipher' },
+    teaserTitle:'МИНИ-ИГРЫ — СКОРО',   /* мишин текст (аудит-2 п.12, слово Павла 22.08) */
+    teaserText:'Участвуй в кибероперациях своей команды и зарабатывай мегабайты в грядущих аркадах',
+    list:[
+      {art:'game_cipher',  nm:'Взлом шифра',  game:'cipher'},
+      {art:'game_captcha', nm:'Обход капчи',  game:'captcha'},
+      {art:'game_ddos',    nm:'DDoS-атака'},
+      {art:'game_packets', nm:'Перехват пакетов'},
+      {art:'game_runner',  nm:'Туннель-раннер'},
+      {art:'game_bots',    nm:'Битва ботов'},
+    ],
+    winToast:'✓ {game}: +{n} байтов',
+    rewardOnceLine:'награда уже получена — сыграно на интерес',
+    winBack:'в штаб',
+    /* «взлом шифра» (волна 21) — тайминг-бар: метка ходит туда-сюда, стоп в зелёной зоне;
+       серия попаданий без промаха, с каждым хитом зона уже и метка быстрее.
+       Серия ≥ minStreak → буст дохода ×(серия−1) на boostMins минут (тап И пассив);
+       забрать кнопкой или играть до промаха (набранное не сгорает). Выдали буст —
+       игра на перезарядке cooldownMins минут; короткая серия (< minStreak) не считается
+       и перезарядку не жжёт. */
+    cipher: {
+      minStreak:3, boostMins:10, cooldownMins:60,     // порог серии; буст ×(серия−1); кулдаун после выдачи
+      zoneStartPct:26, zoneShrinkPct:7, zoneMinPct:6, // ширина зелёной зоны, % бара
+      sweepSec:1.6, speedUpFactor:0.8,                // сек на проход; каждый хит быстрее
+      stopLabel:'Стоп', bankLabel:'Забрать ×{mult}',
+      roundLabel:'серия: {n}',
+      missToast:'мимо зоны — попытка не засчитана (серия короче {min})',
+      winTitle:'Взломано!',
+      winLine:'×{mult} к байтам на {mins} минут',
+      winCdLine:'перезарядка взлома — {cd} минут',
+      boostToast:'⚡ серия {n}: доход ×{mult} на {mins} минут',
+      badgeBoost:'×{mult} {t}', badgeCd:'перезарядка {t}',
+      cdTitle:'Перезарядка',
+      cdLine:'взлом остывает — следующий заход через',
+      texts:{
+        rkn:{title:'Перехват шифровки', sub:'Шифровка ВПН уходит в туннель. Лови метку в зелёной зоне без промаха: серия от {min} даёт буст дохода ×(серия−1) на {mins} минут.'},
+        vpn:{title:'Подбор ключа к туннелю', sub:'Глушилка рядом. Лови метку в зелёной зоне без промаха: серия от {min} даёт буст дохода ×(серия−1) на {mins} минут.'},
+      },
+    },
+    /* «обход капчи» — cols×cols (волна 21: 6×6), за {timerSec} сек тапни все {goodCount}
+       правильные плитки; ошибка или таймаут — заново с 1-го раунда */
+    captcha: {
+      reward:40, rounds:2, timerSec:4, goodCount:3, cols:6,
+      roundLabel:'раунд {n} / {rounds}',
+      failTimeToast:'время вышло — заново',
+      failWrongToast:'не то — заново',
+      winTitle:'Капча пройдена!',
+      texts:{
+        rkn:{title:'Обход капчи', sub:'Докажи системе, что ты не робот: найди запрещёнку среди легального — {good} плитки за {sec} сек.',
+             goodArt:'mg_cap_good_rkn', badArt:'mg_cap_bad_rkn'},
+        vpn:{title:'Обход капчи', sub:'Докажи системе, что ты не робот: найди рабочие зеркала среди заблокированных — {good} плитки за {sec} сек.',
+             goodArt:'mg_cap_good_vpn', badArt:'mg_cap_bad_vpn'},
+      },
+    },
+  },
+
+  leaderboard: {          // таб «Рейтинг» (Figma, волна 5)
+    title:'Рейтинг',
+    tabs:{all:'Все', camp:'Моя команда'},
+    meRank:47,            // ранг своей строки (мок макета — реальный придёт с бэка)
+    meFallback:1200000,   // счёт своей строки, пока живого вклада нет (1.2M из макета)
+    /* 7 строк под аватары rt1..rt7; №1 — из мока Миши, остальные — прежний состав */
+    entries:[
+      {ava:'rt1', nick:'CryptoShadow',      side:'vpn', b:98200000},
+      {ava:'rt2', nick:'neZablokirovan',    side:'vpn', b:48200000},
+      {ava:'rt3', nick:'tovarisch_major',   side:'rkn', b:31400000},
+      {ava:'rt4', nick:'tunnel_krot',       side:'vpn', b:18900000},
+      {ava:'rt5', nick:'reestr_enjoyer',    side:'rkn', b:12100000},
+      {ava:'rt6', nick:'baba_valya_vpn',    side:'vpn', b:8400000},
+      {ava:'rt7', nick:'glushilka_natasha', side:'rkn', b:5300000},
+    ],
+    banner:{ title:'Установи ВПН — поднимись в топе!', sub:'Буст скорости ×2 байтов' },
+  },
+
+  /* 5 табов (волна 20): «Игры» убраны из навигации — тесно (слово Павла 22.08); вход = баннер на штабе */
+  nav:[ ['v-tap','Штаб'], ['v-cards','Карты'], ['v-war','Битва'], ['v-tasks','Задания'], ['v-top','Топ'] ],
+
+  text: {
+    cardsTitle:'Карты улучшений',                          // заголовок экрана карт (Figma)
+    incomeLabel:'ДОХОД',                                   // полоса дохода (Figma)
+    incomeUnit:'/ час',
+    incomeX2:'×{mult} команда',
+    energyLabel:'⚡',
+    battleTitle:'БИТВА ЗА СЕТЬ',                           // карточка на главной (Figma)
+    battleContrib:'Вклад команды:',
+    battleTimer:'До конца битвы:',
+    welcomeToast:'+{bonus} байтов за выбор команды · своя команда = ×{mult}',
+    switchToast:'Перешёл на сторону {camp}',
+    buyToast:'✓ {card} · +{pph}/час',
+    upToast:'⬆ {card} · Ур.{lvl}/{max} · +{pph}/час',
+    poorToast:'не хватает байтов — тапай в штабе',
+    comboToast:'Комбо: +{n} байтов',
+    perHourSub:'доход в час',
+    imbaOwnLabel:'✓ твоя', imbaTag:'имба', lvlLabel:'Ур.{lvl}', maxLabel:'MAX',   /* подача уровня — мишина (фрейм 108:19009): «Ур.N» без /10 */
+    imbaBadge:'ЛЕГЕНДАРНАЯ', lockedLabel:'LOCKED',         // бейджи имба-карты (Figma)
+    imbaHookText:'Поставь VPN',                    // крючок-строка имбы (Figma волна 13)
+    imbaHookBtn:'Установить',
+    imbaX2Line:'х2 доход в час',                           // партнёрская подача локнутой имбы (фрейм 148:10890)
+    imbaX2Note:'При использовании сервиса партнёра',
+    chainToast:'Сначала качни предыдущую карту',           // тост при прямой попытке купить залоченную
+    cardsNote:'арт карт без тумб — заглушки: меняются в карте ART одним ключом',
+  },
+};
+
+/* ================= движок (контента здесь нет) ================= */
+const art = k => ART[k] || '❓';
+const chipIc = () => '<span class="chipIc">' + ART.chip + '</span>';
+const $ = id => document.getElementById(id);
+const E = CONFIG.economy;
+const T = CONFIG.text;
+const TAP_VAL = E.tapBase * E.campMult;
+const L = E.ladder;   // лестница уровней карт
+/* цена следующей покупки карты на уровне lv (0 = ещё не куплена): база×1.5^lv; имба — от imbaUpBase */
+const upPrice = (c, lv) => Math.round((c.imba ? L.imbaUpBase * Math.pow(L.priceMult, lv - 1)
+                                              : c.price * Math.pow(L.priceMult, lv)));
+const tpl = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => (vars && k in vars) ? vars[k] : '{' + k + '}');
+const fmt = n => {
+  n = Math.floor(n);
+  if (n >= 1e9) return (n/1e9).toFixed(2).replace('.', ',') + ' млрд';
+  if (n >= 1e6) return (n/1e6).toFixed(2).replace('.', ',') + ' млн';
+  if (n >= 1e4) return Math.floor(n/1e3).toLocaleString('ru-RU') + ' К';
+  return n.toLocaleString('ru-RU');
+};
+/* формат счёта в «Рейтинге» (макет Миши): миллионы → «98.2M», меньше — обычный fmt */
+const fmtM = n => n >= 1e6 ? (n/1e6).toFixed(1) + 'M' : fmt(n);
+/* MM:SS для бейджа буста/перезарядки шифра (волна 21) */
+const mmss = ms => { const s = Math.max(0, Math.ceil(ms/1000));
+  return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); };
+
+/* ---- состояние (без localStorage: каждый запуск = чистое демо) ---- */
+const S = {
+  side:null, bytes:0, taps:0, en:E.energyMax,
+  owned:{rkn:{}, vpn:{}},
+  vpnInstalled:false, imbaLvl:0, storeVisited:false,   // imbaLvl — уровень имбы (лестница)
+  imbaTouched:false, eventShown:false,   // idle-событие (волна 10): условия и «один раз за сессию»
+  /* откуда игрок вошёл в ВПН-воронку (волна 11): 'card' — стор/меченая/имба-крючок
+     (дефолт), 'event' — кнопка «Участвовать» идл-события. Ветвит шит успеха промокода:
+     card → разлок легендарки, event → регистрация в событии (карта ОСТАЁТСЯ locked) */
+  funnelSource:'card', eventRegistered:false,
+  comboDone:false, tasks:{}, lbTab:'all',
+  tut:{active:false, step:null, taps:0},   // FTUE: только в памяти (перезагрузка = чистое демо)
+  mgWon:{},                                 // разовая награда капчи
+  boost:null, cipherCdUntil:0,              // буст дохода от шифра {mult, until} + перезарядка игры (волна 21)
+};
+const we = CONFIG.war.endsIn;
+const WAR_END = Date.now() + ((we.d*24 + we.h)*3600 + we.m*60 + we.s)*1000;
+
+function pph(){
+  let t = 0;
+  for (const side of ['rkn','vpn'])
+    CONFIG.cards[side].forEach((c,i)=>{ if (!c.imba && S.owned[side][i]) t += c.pph * S.owned[side][i]; });
+  if (S.vpnInstalled && S.side){
+    const c = CONFIG.cards[S.side].find(x=>x.imba);
+    if (c) t += c.pph * S.imbaLvl;   // имба считается один раз (открыта в обоих лагерях)
+  }
+  return t;
+}
+/* буст дохода от «взлома шифра» (волна 21): множитель ко ВСЕМ байтам (тап + пассив); протух → 1 */
+function boostMult(){ return (S.boost && Date.now() < S.boost.until) ? S.boost.mult : 1; }
+
+/* ---- сборка каркаса из CONFIG ---- */
+function buildStatic(){
+  // выбор лагеря (Figma: ВПН слева, РКН справа, VS по центру, инфо-пилюля, CTA снизу)
+  const CS = CONFIG.campSelect;
+  $('campsel').innerHTML =
+    '<div class="csbg"></div>' +
+    '<div class="csHead"><h1>' + CS.title + '</h1>' +
+    (CS.showSub ? '<p class="sub">' + tpl(CS.sub, {mult:E.campMult}) + '</p>' : '') + '</div>' +
+    '<div class="pick">' +
+    ['vpn','rkn'].map(s=>{
+      const c = CONFIG.camps[s];
+      return '<div class="pcard" data-c="' + s + '" id="p_' + s + '" onclick="pickCamp(\'' + s + '\')">' +
+        '<span class="chr neu">' + art(c.poster) + '</span>' +
+        '<span class="chr selc">' + art(c.poster + '_sel') + '</span>' +
+        '<div class="tb"><b>' + c.label + '</b>' +
+        '<span class="camp-badge">' + c.badge + '</span></div></div>';
+    }).join('<span class="vs">' + CS.vs + '</span>') + '</div>' +
+    (CS.showInfo ? '<div class="csinfo"><span class="ai">' + art('alert') + '</span><div>' +
+      CS.infoLines.map(l=>tpl(l,{mult:E.campMult})).join('<br>') + '</div></div>' : '') +
+    '<button class="cbtn" id="campGo" onclick="confirmCamp()"></button>';
+
+  // шапка: профиль (тап = смена стороны) + пилюля валюты
+  $('statusrow').innerHTML =
+    '<div class="profile" id="profile" onclick="toggleSide()">' +
+      '<span class="pava" id="pava">' + art('avatar') + '</span>' +
+      '<div><div class="pn">' + CONFIG.player.name + '</div><div class="pt" id="pteam"></div></div></div>' +
+    '<div class="curpill">' + chipIc() + '<b id="bytes">0</b></div>';
+
+  // штаб: карточка «Битва за сеть» (проценты/итоги — из CONFIG.war, таймер живой)
+  const WB = CONFIG.war;
+  $('battleCard').innerHTML =
+    '<div class="bhead">' +
+      '<div class="kb"><b>' + CONFIG.camps.rkn.label + ' ' + WB.rknPct + '%</b>' +
+        '<span>' + CONFIG.camps.rkn.warWord + '</span></div>' +
+      '<div class="bt bt2">' + T.battleTitle.replace(' ','<br>') + '</div>' +   /* штаб: две строки по фрейму 2010 (аудит-2 п.1) */
+      '<div class="kv"><b>' + (100-WB.rknPct) + '% ' + CONFIG.camps.vpn.label + '</b>' +
+        '<span>' + CONFIG.camps.vpn.warWord + '</span></div></div>' +
+    '<div class="tug"><div class="b" style="width:' + WB.rknPct + '%"></div><div class="r"></div></div>' +
+    '<div class="brow"><span>' + T.battleContrib + '</span><span>' + chipIc() + ' <b id="campContrib">—</b></span></div>' +   /* фрейм 2010: значение вклада прижато вправо */
+    '<div class="brow"><span>' + T.battleTimer + '</span><span class="tmr" id="warTimer2">—</span></div>';
+
+  $('enLabel').textContent = T.energyLabel;
+  $('enMax').textContent = '/ ' + E.energyMax;
+
+  // экран «Игры» (Figma, волна 6; с волны 20 вход — баннер на штабе): тизер + сетка 2×3
+  const MGC = CONFIG.minigames;
+  $('gamesTitle').textContent = MGC.title;
+  $('gamesTeaser').innerHTML = '<b>' + MGC.teaserTitle + '</b><p>' + MGC.teaserText + '</p>';
+  $('ggrid').innerHTML = MGC.list.map(m=> m.game
+    ? '<div class="gtile play" onclick="mgOpen(\'' + m.game + '\')">' +
+      '<span class="gi">' + art(m.art) + '</span><b>' + m.nm + '</b>' +
+      (m.game === 'cipher' ? '<span class="gbadge" id="cipherBadge" style="display:none"></span>' : '') + '</div>'
+    : '<div class="gtile" onclick="mgShake(this)">' +
+      '<span class="gi">' + art(m.art) + '</span><b>' + m.nm + '</b>' +
+      '<span class="soon">' + MGC.soonBadge + '</span></div>').join('');
+
+  // FTUE-коуч
+  $('coachPtr').innerHTML = art('tut_pointer');
+  $('coachSkip').textContent = CONFIG.tutorial.skipLabel;
+
+  // карты: заголовок + полоса дохода (живое число — id=pph, обновляет paint())
+  $('cardsTitle').textContent = T.cardsTitle;
+  $('income').innerHTML =
+    '<span class="lbl">' + T.incomeLabel + '</span>' + chipIc() +
+    '<b id="pph">0</b><span class="ph">' + T.incomeUnit + '</span>' +
+    '<span class="x2">' + tpl(T.incomeX2,{mult:E.campMult}) + '</span>';
+  $('codechip').textContent = CONFIG.codeEntry.chipLabel;
+  $('cardsNote').textContent = T.cardsNote;
+
+  // война — «Битва команд» (Figma, волна 2): карточка битвы + приз + рефералка + топ-вкладчики
+  const W = CONFIG.war;
+  const topAva = ['lb1','lb2','lb3','lb1','lb2'];
+  const top5 = CONFIG.leaderboard.entries.slice().sort((a,b)=>b.b-a.b).slice(0,5);
+  $('v-war').innerHTML =
+    '<h3 class="sect" style="font-size:20px;font-weight:900">' + W.title + '</h3>' +
+    '<div class="battle">' +
+      '<div class="bhead">' +
+        '<div class="kb"><b>' + CONFIG.camps.rkn.label + ' ' + W.rknPct + '%</b>' +
+          '<span>' + CONFIG.camps.rkn.warWord + '</span></div>' +
+        '<div class="bt">' + T.battleTitle + '</div>' +
+        '<div class="kv"><b>' + (100-W.rknPct) + '% ' + CONFIG.camps.vpn.label + '</b>' +
+          '<span>' + CONFIG.camps.vpn.warWord + '</span></div></div>' +
+      '<div class="tug"><div class="b" style="width:' + W.rknPct + '%"></div><div class="r"></div></div>' +
+      '<div class="brow"><span>' + W.contribLabel + '</span>' +
+        '<span>' + chipIc() + ' <b id="warContrib">—</b></span></div>' +   /* значение у правого края, как таймер строкой ниже (аудит-2 C2) */
+      '<div class="brow"><span>' + W.myWeightLabel + ':</span><span><b id="myWeight">0</b></span></div>' +
+      '<div class="brow"><span>' + T.battleTimer + '</span><span class="tmr" id="warTimer">—</span></div>' +
+      '<div class="prize"><div class="aw">' + art('award') + '</div>' +
+        '<div><div class="pl">' + W.prizeLabel + '</div>' +
+        '<div class="pv">' + chipIc() + fmt(W.prizePool) + '</div></div></div>' +
+    '</div>' +
+    '<div class="refpanel"><div class="rrow"><span class="ui">' + art('users') + '</span>' +
+      '<p>' + W.inviteLine + '</p></div>' +
+      '<button class="btnp sm" onclick="toast(CONFIG.war.inviteStub)">' + W.inviteBtn + '</button></div>' +
+    '<div class="topttl">' + W.topTitle + '</div>' +
+    top5.map((r,i)=>
+      '<div class="toprow ' + r.side + '"><span class="rk">' + (i+1) + '</span>' +
+      '<span class="tav">' + art(topAva[i]) + '</span>' +
+      '<div class="tn"><b>' + r.nick + '</b><span>' + W.teamTags[r.side] + '</span></div>' +
+      '<span class="tc">' + chipIc() + fmt(r.b) + '</span></div>').join('');
+
+  // задания (Figma, волна 4): комбо-тизер + баннер награды (живой сбор) + секция миссий
+  const CB = CONFIG.combo;
+  $('tasksTitle').textContent = CONFIG.tasks.title;
+  $('comboBlock').innerHTML =
+    '<div class="secrow"><span class="st">' + CB.title + '</span>' +
+      '<span class="sn">' + CB.refreshNote + '</span></div>' +
+    '<div class="comboRow">' + CB.slots.map(s=> s.mystery
+      ? '<div class="cslot mystery"><div class="cb"></div><div class="cl">' + s.label + '</div></div>'
+      : '<div class="cslot"><div class="cb">' + art(s.art) + '</div><div class="cl">' + s.label + '</div></div>'
+    ).join('') + '</div>' +
+    '<div class="rewardbar"><span class="aw26">' + art('award') + '</span>' +
+      '<span class="rl">' + CB.rewardLabel + '</span>' +
+      '<span class="rv">' + chipIc() + fmt(E.comboReward) + '</span>' +
+      '<button class="btnp sm" id="comboBtn" onclick="claimCombo()"></button></div>' +
+    '<div class="secrow"><span class="st">' + CONFIG.tasks.sectionTitle + '</span></div>';
+  $('tasksNote').textContent = CONFIG.tasks.note;
+
+  // топ «Рейтинг» (Figma, волна 5): заголовок + свитчер + компакт-полоса битвы + баннер-воронка
+  $('topTitle').textContent = CONFIG.leaderboard.title;
+  $('lbTabs').innerHTML = ['all','camp'].map(t=>
+    '<button id="lb_' + t + '" onclick="lbTab(\'' + t + '\')">' + CONFIG.leaderboard.tabs[t] + '</button>').join('');
+  const W2 = CONFIG.war;
+  $('h2h').innerHTML =
+    '<div class="nums"><span class="kb">' + CONFIG.camps.rkn.label + ' ' + W2.rknPct + '%</span>' +
+    '<span class="kv">' + (100 - W2.rknPct) + '% ' + CONFIG.camps.vpn.label + '</span></div>' +
+    '<div class="tug"><div class="b" style="width:' + W2.rknPct + '%"></div><div class="r"></div></div>';
+  $('banner').innerHTML =
+    '<div class="bt2"><b>' + CONFIG.leaderboard.banner.title + '</b>' +
+    '<span>' + CONFIG.leaderboard.banner.sub + '</span></div>' +
+    '<span class="chev">' + art('chev') + '</span>';
+
+  // нижняя навигация (иконки Figma из ART: nav_home/cards/war/tasks/top — инлайн-svg,
+  // stroke=currentColor красится в цвет лагеря)
+  const NAV_IC = {'v-tap':'nav_home','v-cards':'nav_cards','v-war':'nav_war','v-tasks':'nav_tasks','v-top':'nav_top'};
+  $('nav').innerHTML = CONFIG.nav.map(([v,l],i)=>
+    '<button' + (i===0?' class="on"':'') + ' data-v="' + v + '" onclick="go(\'' + v + '\',this)">' +
+    '<span class="nic">' + art(NAV_IC[v]) + '</span>' + l + '</button>').join('');
+
+  // фейк-стор — страница App Store (Figma волна 8, светлая). ‹ = назад в игру
+  const ST = CONFIG.store;
+  $('store').innerHTML =
+    '<div class="sb-status"><span>' + ST.time + '</span><span class="sb-levels">' +
+      '<svg width="19" height="12" viewBox="0 0 19 12" fill="#000"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2.5" width="3" height="9.5" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>' +
+      '<svg width="17" height="12" viewBox="0 0 17 12" fill="#000"><path d="M8.5 12 12 8.2a5 5 0 0 0-7 0L8.5 12Zm5.2-5.5a8.4 8.4 0 0 0-10.4 0L1 4.1a11.6 11.6 0 0 1 15 0l-2.3 2.4Z"/></svg>' +
+      '<svg width="27" height="13" viewBox="0 0 27 13"><rect x="0.5" y="0.5" width="22" height="12" rx="3.5" stroke="#000" opacity=".35" fill="none"/><rect x="2" y="2" width="19" height="9" rx="2" fill="#000"/><path d="M24.5 4.5v4a2.2 2.2 0 0 0 0-4Z" fill="#000" opacity=".4"/></svg>' +
+    '</span></div>' +
+    '<div class="sb-tool"><button class="sb-circle" onclick="closeStore()" title="назад в игру">‹</button>' +
+      '<button class="sb-circle"><svg width="18" height="20" viewBox="0 0 18 20" fill="none"><path d="M9 1v12M5 5l4-4 4 4" stroke="#404040" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9" stroke="#404040" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>' +
+    '<div class="scroll">' +
+      '<div class="shead"><div class="sicon">' + art('store_icon') + '</div>' +
+      '<div class="smeta"><h2>' + ST.title + '</h2><p class="tag">' + ST.tagline + '</p>' +
+      '<button class="getbtn" id="getBtn" onclick="installApp()"><span class="prog"></span>' +
+      '<span class="gt" id="getTxt">' + ST.getLabel + '</span></button></div></div>' +
+      '<div class="srow">' +
+        '<div class="cell"><div class="cl">' + ST.ratingLabel + '</div><div class="cv">' + ST.rating + '</div><div class="cs">' + ST.stars + '</div></div><div class="sep"></div>' +
+        '<div class="cell"><div class="cl">' + ST.ageLabel + '</div><div class="cv">' + ST.age + '</div><div class="cs">' + ST.ageSub + '</div></div><div class="sep"></div>' +
+        '<div class="cell"><div class="cl">' + ST.chartLabel + '</div><div class="cv"><span style="font-size:15px">' + ST.chartNo + '</span>' + ST.chartPos + '</div><div class="cs">' + ST.chartSub + '</div></div><div class="sep"></div>' +
+        '<div class="cell"><div class="cl">' + ST.devLabel + '</div><div class="cv"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" style="vertical-align:-4px"><circle cx="13" cy="13" r="11" stroke="#8E8E93" stroke-width="2"/><circle cx="13" cy="10.5" r="3.4" stroke="#8E8E93" stroke-width="2"/><path d="M6.6 21a8.4 8.4 0 0 1 12.8 0" stroke="#8E8E93" stroke-width="2"/></svg></div><div class="cs">' + ST.dev + '</div></div>' +
+      '</div>' +
+      '<div class="shots">' + art('store_shot_off') + art('store_shot_on') + '</div>' +
+    '</div>' +
+    '<div class="sb-tab"><div class="sb-pill">' + ST.tabs.map(t =>
+      '<button class="sb-tabbtn"><svg viewBox="0 0 22 22" fill="none"><rect x="4" y="4" width="14" height="14" rx="3.5" stroke="#8E8E93" stroke-width="1.6"/></svg>' + t + '</button>').join('') +
+    '</div><div class="sb-search"><svg width="19" height="19" viewBox="0 0 19 19" fill="none"><circle cx="8" cy="8" r="6" stroke="#08F" stroke-width="2"/><path d="m13 13 4 4" stroke="#08F" stroke-width="2" stroke-linecap="round"/></svg></div></div>';
+
+  // онбординг — 4 УТП-слайда Figma (волна 11): арт и тексты на точных позициях макета,
+  // градиент-панели фона живут выше, в самом .onb (общие, тянутся за футер)
+  const OB = CONFIG.onboarding;
+  $('slides').innerHTML = OB.slides.map(s =>
+    '<div class="slide">' +
+    '<div class="heroA" style="' + s.img + '">' + art(s.art) + '</div>' +
+    (s.deco ? '<div class="deco" style="' + s.decoPos + '">' + art(s.deco) + '</div>' : '') +
+    '<div class="txt"><h2>' + s.h.replace('\n','<br>') + '</h2><p>' + s.p + '</p></div></div>').join('');
+  const nSlides = OB.slides.length;
+  $('onbDots').innerHTML = Array.from({length:nSlides}, (_,i)=>'<i' + (i===0?' class="on"':'') + '></i>').join('');
+  $('onbNext').textContent = OB.nextLabel;
+
+  // приложение ВПН (Figma волна 8): один рендер, состояние вкл/выкл — класс .conn + paintVpnApp()
+  const VA = CONFIG.vpnApp;
+  $('vapp').innerHTML =
+    '<div class="vnav"><button class="vbtn">' + art('vpn_menu') + '</button>' +
+      '<span class="vt">' + VA.title + '</span>' +
+      '<button class="vbtn">' + art('vpn_settings') + '</button></div>' +
+    '<div class="vstatus" id="vaStatus"></div>' +
+    '<div class="vherowrap"><div class="vring" onclick="powerTap()"><div class="vpower">' + art('vpn_power') + '</div></div>' +
+    '<div class="vhint" id="vaHint"></div></div>' +
+    '<div class="vread">' +
+      '<div class="vcard"><div class="l">' + art('vpn_globe') + '<span class="ll">' + VA.ipLabel + '</span></div><span class="lv">' + VA.ip + '</span></div>' +
+      '<div class="vspeed">' +
+        '<div class="vs1"><div class="circ g">' + art('vpn_dl') + '</div><div class="col"><span class="sl">' + VA.dlLabel + '</span><span class="sv" id="vaDl"></span></div></div>' +
+        '<div class="vs1"><div class="circ r">' + art('vpn_ul') + '</div><div class="col"><span class="sl">' + VA.ulLabel + '</span><span class="sv" id="vaUl"></span></div></div>' +
+      '</div></div>' +
+    '<div class="vdrawer"><div class="vserver"><div class="l"><span class="fl">' + VA.flag + '</span>' +
+      '<span><div class="cn">' + VA.country + '</div><div class="sd">' + VA.server + '</div></span></div>' +
+      art('vpn_chev').replace('<img ','<img class="ch" ') + '</div></div>';
+
+  // шторка подарка (промокод выдаётся ПОСЛЕ включения ВПН)
+  const G = CONFIG.giftSheet;
+  $('giftM').classList.add('bot');
+  $('giftM').innerHTML =
+    '<div class="bsheet left"><div class="dragpill"></div>' +
+    '<button class="ex" onclick="closeM(\'giftM\')">' + art('xclose') + '</button>' +
+    '<div class="gh">' + G.title + '</div>' +
+    '<div class="gs">' + G.sub + '</div>' +
+    '<div class="pbox"><div class="plabel">' + G.promoLabel + '</div>' +
+      '<div class="crow"><div class="cval">' + CONFIG.app.promo + '</div>' +
+      '<button class="btng sm copy" id="copyBtn" onclick="copyPromo()">' + G.copyLabel + '</button></div>' +
+      '<div class="pcap">' + G.captionA + '<b>' + G.captionB + '</b></div></div>' +
+    '<button class="cta70 btng" onclick="goToGame()">' + G.ctaLabel + '</button></div>';
+  $('slides').addEventListener('scroll', ()=>{
+    const el = $('slides');
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    if (i !== onbIdx){ onbIdx = i; onbDots(); }
+  }, {passive:true});
+
+  // шторка ввода промокода (Figma, волна 2)
+  const CE = CONFIG.codeEntry;
+  $('codeM').classList.add('bot');
+  $('codeM').innerHTML =
+    '<div class="bsheet codepop"><div class="dragpill"></div>' +
+    '<button class="ex" onclick="closeM(\'codeM\')">' + art('xclose') + '</button>' +
+    '<h2>' + CE.title + '</h2>' +
+    '<p class="lbl">' + CE.sub + '</p>' +
+    '<div class="coderow">' +
+      '<input class="codein" id="codein" placeholder="' + CE.placeholder + '" autocomplete="off" spellcheck="false">' +
+      '<button class="paste" onclick="pasteCode()">' + CE.pasteLabel + '</button></div>' +
+    '<div class="codeerr" id="codeerr"></div>' +
+    '<button class="cta70 btnp" onclick="submitCode()">' + CE.submitLabel + '</button>' +
+    '<button class="later" onclick="closeM(\'codeM\')">' + CE.laterLabel + '</button></div>';
+
+  // шторка успеха промокода (Figma, волны 2+8): превью имбы + бонус (+ тизер Дугина по флагу)
+  const U = CONFIG.unlock;
+  $('unlockM').classList.add('bot');
+  $('unlockM').innerHTML =
+    '<div class="bsheet unlockpop"><div class="dragpill"></div>' +
+    '<button class="ex" onclick="closeUnlock()">' + art('xclose') + '</button>' +
+    '<div class="eyebrow">' + U.eyebrow + '</div>' +
+    '<div class="hline">' + U.headline + '</div>' +
+    '<div class="imbaprev"><div class="band" id="unlockArt"></div>' +
+      '<div class="pb"><div class="nm" id="unlockName"></div>' +
+      '<div class="val" id="unlockPph"></div>' +
+      '<div class="note">' + U.cardNote + '</div></div></div>' +
+    '<div class="bonuspill">' + art('gift') + '<span>' + tpl(U.gainBonus,{bonus:fmt(E.codeBonus)}) + '</span></div>' +
+    (U.showBossTeaser ?
+      '<div class="boss"><div class="bossart"><span>' + art('boss') + '</span><i class="laser"></i><i class="laser l2"></i></div>' +
+      '<div><b>' + U.bossTitle + '</b><span>' + U.bossDesc + '</span></div></div>' +
+      '<button class="later" style="padding:6px 0 10px" onclick="toast(CONFIG.unlock.raidStub)">' + U.raidLabel + '</button>' : '') +
+    '<button class="cta70 btnp" style="margin-top:0" onclick="closeUnlock()">' + U.backLabel + '</button></div>';
+
+  // app-switch тайминги (CONFIG.transitions) — в CSS-переменные
+  document.documentElement.style.setProperty('--swms', CONFIG.transitions.ms + 'ms');
+  document.documentElement.style.setProperty('--swease', CONFIG.transitions.ease);
+
+  // системный «Открыть ссылку?» в игре (волна 13, Figma 160:12487)
+  const LD = CONFIG.linkDialog;
+  $('linkDlg').innerHTML =
+    '<div class="idbox"><div class="idt">' + LD.title + '</div>' +
+    '<div class="idu">' + LD.url + '</div>' +
+    '<div class="idbtns"><button class="idc" onclick="linkDlgCancel()">' + LD.cancelLabel + '</button>' +
+    '<button class="ido" onclick="linkDlgOpen()">' + LD.openLabel + '</button></div></div>';
+
+  // Safari со страницей apple.com и вопросом про App Store (Figma 148:8598, волна 18):
+  // весь хром (статус-бар, адресная строка, иконки) — SVG-экспорт слоёв фрейма как есть,
+  // живой только диалог (тексты/кнопки из CONFIG.safari)
+  const SF = CONFIG.safari;
+  $('safari').innerHTML =
+    '<div class="saf-status">' + art('saf_status') + '</div>' +
+    '<div class="saf-page">' + art('saf_page').replace('<img ','<img class="pg" ') +
+      '<div class="saf-dim" id="safDim"></div>' +
+      '<div class="saf-dlg" id="safDlg"><div class="sdt">' + SF.dialogText + '</div>' +
+      '<div class="sdb"><button onclick="safCancel()">' + SF.cancelLabel + '</button>' +
+      '<button class="op" onclick="safOpenStore()">' + SF.openLabel + '</button></div></div></div>' +
+    '<div class="saf-bar">' + art('saf_bar') + '<div class="saf-home"></div></div>';
+
+  // интро-онбординг игры — Figma волна 13: герой = запечённый кроп фрейма (390×580),
+  // заголовок/точки/кнопки живые; продолжения фоновых панелей стартуют РОВНО под героем
+  const IO = CONFIG.introOnboarding;
+  $('islides').innerHTML = IO.slides.map(s =>
+    '<div class="islide">' + art(s.art).replace('<img ', '<img class="ihero" ') +
+    '<h2>' + s.h.replace('\n','<br>') + '</h2></div>').join('');
+  $('intro').insertAdjacentHTML('afterbegin', ART[IO.slides[0].art].replace('<img ', '<img class="ibg" '));
+  $('introDots').innerHTML = IO.slides.map((_,i)=>'<i' + (i===0?' class="on"':'') + '></i>').join('');
+  $('introNext').textContent = IO.nextLabel;
+  $('introSkip').textContent = IO.skipLabel;
+  $('islides').addEventListener('scroll', ()=>{
+    const el = $('islides');
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    if (i !== introIdx){ introIdx = i; introPaint(); }
+  }, {passive:true});
+}
+
+/* ---- рендер живых частей ---- */
+function paint(){
+  $('bytes').textContent = fmt(S.bytes);
+  $('pph').textContent = '+' + fmt(pph());
+  $('en').textContent = Math.floor(S.en);
+  $('enbar').style.width = (100*S.en/E.energyMax) + '%';
+  if (S.side){
+    /* аватар шапки = персонаж команды (Figma волна 9) */
+    $('pava').innerHTML = art('avatar_' + S.side) || art('avatar');
+    $('tapArt').innerHTML = art('tap_' + S.side);
+    $('taphint').innerHTML = tpl(CONFIG.camps[S.side].taphint, {tap:TAP_VAL, mult:E.campMult});
+    $('pteam').textContent = CONFIG.camps[S.side].team;
+    $('campContrib').textContent = CONFIG.war[S.side + 'Total'];
+    $('warContrib').textContent = CONFIG.war[S.side + 'Total'];
+  }
+  $('myWeight').textContent = fmt(S.taps * TAP_VAL);
+  $('codechip').classList.toggle('show', S.storeVisited && !S.vpnInstalled);
+  paintAfford();   // волна 16: авто-подсветка кнопок покупки при каждом изменении баланса
+}
+
+/* тап по профилю в шапке = смена стороны (пункт «можно сменить сторону позже») */
+function toggleSide(){
+  if (!S.side) return;
+  switchSide(S.side === 'vpn' ? 'rkn' : 'vpn');
+}
+
+/* лок цепочки (правка Саши 21.08): карта i доступна, когда предыдущая по списку качнута
+   до уровня ≥1 (i=0 всегда открыта; имба вне цепочки — у неё свой ВПН-разлок) */
+function chainLocked(i){
+  if (!L.chainLock || i === 0) return false;
+  if (CONFIG.cards[S.side][i].imba) return false;
+  return !((S.owned[S.side][i-1] || 0) > 0);
+}
+
+/* фейк-запрос на сервер при прокачке (правка Саши 21.08, как в Хомяке): кнопка →
+   лоадер-спиннер на buyDelayMs → реальная покупка. Даблтапы глушатся флагом. */
+let buying = false;
+/* нехватка байтов на СЛЕДУЮЩУЮ покупку карты i (класс .poor). Локи — не про деньги:
+   локнутая имба (крючок), цепочка и MAX класс не получают и от баланса не зависят */
+function cardPoor(i){
+  const c = CONFIG.cards[S.side][i];
+  if (c.imba && !S.vpnInstalled) return false;
+  const lv = c.imba ? S.imbaLvl : (S.owned[S.side][i] || 0);
+  if (lv >= L.maxLvl) return false;
+  if (!c.imba && chainLocked(i)) return false;
+  return S.bytes < upPrice(c, lv);
+}
+
+/* живая доступность покупок (правка Павла, волна 16): пассивка натикала выше цены —
+   кнопка сама «зажигается» (и гаснет обратно после траты). Дёргается из paint() каждым
+   тиком/тапом; трогает ТОЛЬКО класс .poor у видимых карт и кнопки шита — без ре-рендера */
+function paintAfford(){
+  if (!S.side) return;
+  for (const el of $('grid').children){
+    if (el.dataset.i === undefined) continue;
+    /* стороны с 22.08 разной длины: при смене стороны в сетке мгновение живут
+       индексы прежней — гард, пока paintCards не перерисовал */
+    if (!CONFIG.cards[S.side][+el.dataset.i]) continue;
+    el.classList.toggle('poor', cardPoor(+el.dataset.i));
+  }
+  const pb = $('popBuy');
+  if (pb && popCtx && !pb.classList.contains('pend'))
+    pb.classList.toggle('poor', cardPoor(popCtx.i));
+}
+
+function netBuy(btn, apply){
+  if (buying) return;
+  buying = true;
+  if (btn){
+    btn.classList.add('pend');
+    btn.innerHTML = '<span class="ldr"></span>';
+  }
+  setTimeout(()=>{ buying = false; apply(); }, E.buyDelayMs);
+}
+
+function paintCards(){
+  const g = $('grid'); g.innerHTML = '';
+  // FTUE: подсветить самую дешёвую доступную карту (лок цепочки уважаем)
+  let tutIdx = -1;
+  if (S.tut.active){
+    let best = Infinity;
+    CONFIG.cards[S.side].forEach((c,i)=>{
+      if (!c.imba && !S.owned[S.side][i] && !chainLocked(i) && c.price < best){ best = c.price; tutIdx = i; }
+    });
+  }
+  // рендер по макету Миши: имба — ведущая карта на всю ширину СВЕРХУ, дальше сетка 2 колонки
+  const pool = CONFIG.cards[S.side].map((c,i)=>({c,i}));
+  pool.sort((a,b)=>(b.c.imba?1:0)-(a.c.imba?1:0));   // имба вперёд; логика buy(i) — по исходному индексу
+  const lvlBadge = lv => '<div class="bLv">' + tpl(T.lvlLabel,{lvl:lv, max:L.maxLvl}) + '</div>';
+  pool.forEach(({c,i})=>{
+    // лестница: уровень карты живёт в S.owned (число), имбы — в S.imbaLvl
+    const lv = c.imba ? (S.vpnInstalled ? S.imbaLvl : 0) : (S.owned[S.side][i] || 0);
+    const owned = lv > 0;
+    const el = document.createElement('div');
+    let cls = 'gcard', body = '';
+    if (i === tutIdx) cls += ' tuthl';
+    // доход на текущем уровне (не куплена — что даст уровень 1)
+    const val = '<div class="val">' + chipIc() + '+' + fmt(c.pph * Math.max(1, lv)) + '<span class="ph">/час</span></div>';
+    if (c.imba){
+      cls += ' imba';
+      const locked = !S.vpnInstalled;
+      /* локнутая имба (волна 13, фрейм 148:10890): вместо живого дохода — партнёрская
+         подача «х2 доход в час» + «При использовании сервиса партнёра» */
+      const imbaVal = locked
+        ? '<div class="val" style="font:700 12px \'Geist\',var(--f)">' + chipIc() +
+          T.imbaX2Line.replace(' ', ' <span class="ph">') + '</span></div>' +   /* «доход в час» приглушён, «х2» белый (аудит-2 B15) */
+          '<div class="note">' + T.imbaX2Note + '</div>'
+        : val;
+      body =
+        '<div class="frow"><div class="nm">' + c.nm + '</div>' +
+        (locked
+          ? '<span class="lockpill">' + art('lock') + T.lockedLabel + '</span>'
+          : '<span class="lockpill" style="color:var(--acc2)">' + T.imbaOwnLabel + '</span>') +
+        '</div>' +
+        imbaVal +
+        (locked
+          ? '<div class="hookrow"><span class="hi">' + art('lock_gold') + '</span>' +
+            '<span>' + T.imbaHookText + '</span><button class="btnp sm">' + T.imbaHookBtn + '</button></div>'
+          : (lv >= L.maxLvl
+              ? '<div class="own">' + T.maxLabel + '</div>'
+              : '<button class="buyb btnp sm">' + chipIc() + fmt(upPrice(c, lv)) + '</button>'));
+    } else if (lv >= L.maxLvl){
+      cls += ' owned';
+      body = '<div class="nm">' + c.nm + '</div>' + val +
+        '<div class="own">' + T.maxLabel + '</div>';
+    } else if (chainLocked(i)){
+      // лок цепочки — подача Миши (волна 13): синяя кнопка на 40% с одним замком
+      cls += ' chained';
+      body = '<div class="nm">' + c.nm + '</div>' + val +
+        '<button class="buyb btnp sm"><span class="lkic">' + art('lock') + '</span></button>';
+    } else {
+      if (owned) cls += ' owned';
+      body = '<div class="nm">' + c.nm + '</div>' + val +
+        '<button class="buyb btnp sm">' + chipIc() + fmt(upPrice(c, lv)) + '</button>';
+    }
+    if (c.marked && !owned) cls += ' marked';
+    if (cardPoor(i)) cls += ' poor';   // волна 16: единый расчёт доступности (и у имбы)
+    el.dataset.i = i;                  // якорь для живого paintAfford()
+    el.className = cls;
+    el.innerHTML =
+      '<div class="flash"></div>' +
+      '<div class="band">' + art(c.art) + '</div>' +
+      /* строка бейджей тумбы (волна 13): Ур.N → метка ×2 → ЛЕГЕНДАРНАЯ у правого края */
+      '<div class="thh">' + lvlBadge(lv) +
+      (c.marked && !owned ? '<div class="mark">' + CONFIG.camps[S.side].mark + '</div>' : '') +
+      (c.imba && !S.vpnInstalled ? '<div class="bLeg">' + T.imbaBadge + '</div>' : '') +
+      '</div>' +
+      '<div class="gbody">' + body + '</div>';
+    if (c.marked && !owned)
+      el.querySelector('.mark').onclick = e => { e.stopPropagation(); openStore('mark'); };
+    /* волна 9: тап по карте = всплывашка; кнопка «улучшить» = прямая покупка без шита.
+       21.08: успешная покупка идёт через лоадер «запрос на сервер» (netBuy); нехватка
+       байтов и прочие отказы остаются мгновенными (wobble/тост без фейк-запроса) */
+    const bb = el.querySelector('.buyb');
+    if (bb) bb.onclick = e => {
+      e.stopPropagation();
+      if (chainLocked(i) && !c.imba){ openCardPop(i, el); return; }   // замок → залоченный шит (фрейм 151:11340)
+      if (c.imba){
+        S.imbaTouched = true;
+        if (S.imbaLvl < L.maxLvl && S.bytes >= upPrice(c, S.imbaLvl)) netBuy(bb, ()=>buyImba(el));
+        else buyImba(el);
+      } else {
+        const lv = S.owned[S.side][i] || 0;
+        if (lv < L.maxLvl && S.bytes >= upPrice(c, lv)) netBuy(bb, ()=>buy(i, el));
+        else buy(i, el);
+      }
+    };
+    el.onclick = ()=>{
+      if (c.imba){
+        S.imbaTouched = true;   // idle-событие (волна 10): имбу потрогали — оффер не показываем
+        if (S.vpnInstalled){ openCardPop(i, el); return; }   // разлочена — шит с апгрейдом
+        if (S.storeVisited){ S.funnelSource = 'card'; openCode(); }   // тап по имбе = вход «за карту»
+        else openStore('imba');
+        return;
+      }
+      openCardPop(i, el);   // залоченная цепочкой тоже открывает шит — в залоченном виде (фрейм 151:11340)
+    };
+    g.appendChild(el);
+  });
+}
+
+function buy(i, el){
+  const c = CONFIG.cards[S.side][i];
+  const lv = S.owned[S.side][i] || 0;
+  if (chainLocked(i)){                              // лок цепочки (правка Саши 21.08)
+    if (el){ el.classList.remove('wob'); void el.offsetWidth; el.classList.add('wob'); }
+    toast(T.chainToast);
+    return false;
+  }
+  if (lv >= L.maxLvl) return;                       // потолок лестницы: дальше некуда
+  const pr = upPrice(c, lv);
+  if (S.bytes < pr){
+    el.classList.remove('wob'); void el.offsetWidth; el.classList.add('wob');
+    toast(T.poorToast);
+    return false;
+  }
+  S.bytes -= pr;
+  S.owned[S.side][i] = lv + 1;                      // покупка = +1 уровень (1-я покупка = уровень 1)
+  el.classList.add('bought');
+  toast(lv ? tpl(T.upToast, {card:c.nm, lvl:lv+1, max:L.maxLvl, pph:fmt(c.pph)})
+           : tpl(T.buyToast, {card:c.nm, pph:fmt(c.pph)}));
+  if (S.tut.active) tutEnd();   // FTUE: первая покупка = цель обучения (похвала перекроет тост)
+  paint(); paintCards();
+  return true;
+}
+
+/* апгрейд имбы после разлока: та же лестница, база цены — E.ladder.imbaUpBase (разлок = уровень 1) */
+function buyImba(el){
+  if (S.imbaLvl >= L.maxLvl) return false;
+  const c = CONFIG.cards[S.side].find(x=>x.imba);
+  const pr = upPrice(c, S.imbaLvl);
+  if (S.bytes < pr){
+    el.classList.remove('wob'); void el.offsetWidth; el.classList.add('wob');
+    toast(T.poorToast);
+    return false;
+  }
+  S.bytes -= pr;
+  S.imbaLvl++;
+  el.classList.add('bought');
+  toast(tpl(T.upToast, {card:c.nm, lvl:S.imbaLvl, max:L.maxLvl, pph:fmt(c.pph)}));
+  paint(); paintCards();
+  return true;
+}
+
+/* ---- всплывашка карточки (Figma волна 9): арт + описание + уровень/доход + улучшение ---- */
+let popCtx = null;   // {i, el} открытой карты (el — элемент сетки, для анимаций покупки)
+function openCardPop(i, el){
+  const c = CONFIG.cards[S.side][i];
+  const CP = CONFIG.cardPopup;
+  const lv = c.imba ? S.imbaLvl : (S.owned[S.side][i] || 0);
+  const maxed = lv >= L.maxLvl;
+  const chained = !c.imba && chainLocked(i);   // залоченный вид шита (волна 13, фрейм 151:11340)
+  const pr = maxed ? 0 : upPrice(c, lv);
+  popCtx = {i, el};
+  const m = $('cardM');
+  m.classList.add('bot');
+  m.innerHTML =
+    '<div class="bsheet cardpop"><div class="dragpill"></div>' +
+    '<button class="shx" onclick="closeM(\'cardM\')">' + art('xclose') + '</button>' +
+    '<div class="cthumb">' + art(c.art) + '</div>' +
+    '<div class="ct">' + c.nm + '</div>' +
+    '<div class="cd">' + (c.ds || '') + '</div>' +
+    '<div class="cpills">' +
+      (chained ? '' : '<span class="cpill">' + tpl(CP.lvlLabel, {lvl:lv}) + '</span>') +
+      '<span class="cpill">' + chipIc() + tpl(CP.gainLabel, {pph:fmt(c.pph)}) + '</span></div>' +
+    (chained
+      ? '<div class="cta70 btnp chainlk">' + art('lock') + '<span>' + CP.chainLine + '</span></div>'
+      : maxed
+        ? '<div class="cmax">' + CP.maxLabel + '</div>'
+        : '<button class="cta70 btnp' + (S.bytes < pr ? ' poor' : '') + '" id="popBuy">' +
+          CP.buyLabel + ' ' + chipIc() + fmt(pr) + '</button>') +
+    '</div>';
+  if (!maxed && !chained) $('popBuy').onclick = popBuy;
+  m.onclick = e => { if (e.target === m) closeM('cardM'); };   // тап по подложке = закрыть
+  m.classList.add('on');
+}
+function popBuy(){
+  const {i, el} = popCtx || {};
+  const c = CONFIG.cards[S.side][i];
+  const done = ()=>{
+    const ok = c.imba ? buyImba(el) : buy(i, el);
+    if (ok) closeM('cardM');          // успех — вернуться к сетке (вспышка покупки на карте)
+    else openCardPop(i, el);          // не хватило — перерисовать шит (кнопка в poor)
+  };
+  const lv = c.imba ? S.imbaLvl : (S.owned[S.side][i] || 0);
+  // 21.08: платёжеспособная покупка — через лоадер «запрос на сервер»; отказ — мгновенно
+  if (lv < L.maxLvl && S.bytes >= upPrice(c, lv)) netBuy($('popBuy'), done);
+  else done();
+}
+
+function paintTasks(){
+  const TK = CONFIG.tasks;
+  $('comboBtn').disabled = S.comboDone;
+  $('comboBtn').textContent = S.comboDone ? TK.comboDone : '+' + fmt(E.comboReward);
+  /* 4-статусная кнопка (волна 8): go «Перейти» → avail «Проверить» → checking → done */
+  $('tasks').innerHTML = TK.list.map(t=>{
+    const st = S.tasks[t.k] || 'go';
+    const btn =
+      st==='go'       ? '<button class="tbtn btnp sm" onclick="taskGo(\'' + t.k + '\')">' + TK.btnGo + '</button>' :
+      st==='avail'    ? '<button class="tbtn btnp sm" onclick="checkTask(\'' + t.k + '\')">' + TK.btnAvail + '</button>' :
+      st==='checking' ? '<button class="tst chk" disabled>' + TK.btnChecking + '</button>' :
+                        '<button class="tst don" disabled>' + TK.btnDone + '</button>';
+    return '<div class="task ' + (st==='go'||st==='avail'?'':st) + '">' +
+      '<div class="tico">' + art(t.tic || '') + '</div>' +
+      '<div class="tx"><b>' + t.nm + '</b>' +
+      '<span class="rw2">' + art('lock_blue') + t.rw + '</span></div>' + btn + '</div>';
+  }).join('');
+}
+/* «Перейти» = симуляция ухода в соцсеть (в демо — смена статуса; линк-заглушка допустима) */
+function taskGo(k){
+  if ((S.tasks[k] || 'go') !== 'go') return;
+  S.tasks[k] = 'avail'; paintTasks();
+}
+function checkTask(k){
+  if (S.tasks[k] !== 'avail') return;
+  S.tasks[k] = 'checking'; paintTasks();
+  setTimeout(()=>{
+    S.tasks[k] = 'done'; paintTasks();
+    const t = CONFIG.tasks.list.find(x=>x.k===k);
+    toast(tpl(CONFIG.tasks.doneToast, {rw:t.rw}));   // начисление — прежний хук-тост
+  }, CONFIG.tasks.checkMs);
+}
+function claimCombo(){
+  if (S.comboDone) return;
+  S.comboDone = true; S.bytes += E.comboReward;
+  paint(); paintTasks();
+  toast(tpl(T.comboToast, {n:fmt(E.comboReward)}));
+}
+
+/* «Рейтинг»: лидеры + своя строка, ЗАКРЕПЛЁННАЯ внизу (ранг из CONFIG, не по сортировке).
+   «Мой лагерь» — клиентский фильтр по стороне игрока, ранги пересчитываются 1..N */
+function paintTop(){
+  $('lb_all').classList.toggle('on', S.lbTab==='all');
+  $('lb_camp').classList.toggle('on', S.lbTab==='camp');
+  const LB = CONFIG.leaderboard;
+  let rows = LB.entries.slice().sort((a,b)=>b.b-a.b);
+  if (S.lbTab==='camp') rows = rows.filter(r=>r.side===S.side);
+  const row = (r, rk, me) =>
+    '<div class="rtrow ' + r.side + (me?' me':'') + '"><span class="rk">' + rk + '</span>' +
+    '<span class="tav">' + art(r.ava) + '</span>' +
+    '<span class="tn">' + r.nick + '</span>' +
+    '<span class="tc">' + chipIc() + fmtM(r.b) + '</span></div>';
+  const myB = S.taps * TAP_VAL || LB.meFallback;   // живой вклад в войну; до первого тапа — мок
+  $('lbrows').innerHTML =
+    rows.map((r,i)=>row(r, i+1)).join('') +
+    row({side:S.side||'vpn', ava:'rt_me', nick:CONFIG.player.name, b:myB}, LB.meRank, true);
+}
+function lbTab(t){ S.lbTab = t; paintTop(); }
+function mgShake(el){ el.classList.remove('wob'); void el.offsetWidth; el.classList.add('wob'); }
+
+/* ---- FTUE-обучение (тексты и числа — CONFIG.tutorial) ----
+   Шаги: tap (5 бустованных тапов) → nav (палец на «Карты») → buy (подсветка
+   дешёвой карты) → конец на первой покупке. Скип доступен всегда. */
+const TUT = CONFIG.tutorial;
+function tutStart(){
+  if (!TUT.enabled) return;
+  S.tut.active = true; S.tut.taps = 0;
+  $('coach').classList.remove('off');
+  tutStep('tap');
+}
+function tutStep(step){ S.tut.step = step; if (step==='buy') paintCards(); tutPaint(); }
+function tutPaint(){
+  if (!S.tut.active) return;
+  const txt = $('coachTxt');
+  let target = null;
+  if (S.tut.step === 'tap'){
+    txt.innerHTML = tpl(TUT.tapText,{goal:TUT.tapGoal}) +
+      '<span class="cnt">' + tpl(TUT.counter,{done:S.tut.taps, goal:TUT.tapGoal}) + '</span>';
+    target = $('tapzone');
+  } else if (S.tut.step === 'nav'){
+    txt.textContent = TUT.buyText;
+    target = document.querySelector('nav button[data-v="v-cards"]');
+  } else if (S.tut.step === 'buy'){
+    txt.textContent = TUT.buyText;
+    target = document.querySelector('.gcard.tuthl');
+  }
+  tutPoint(target);
+}
+/* сцена (волна 19): fixed-слои живут в дизайн-координатах стейджа 390×844, а
+   getBoundingClientRect/clientX отдают вьюпорт-пиксели — переводим через рект сцены */
+const stageScale = () => document.getElementById('stage').getBoundingClientRect().width / 390;
+function stageRectOf(el){
+  const s = document.getElementById('stage').getBoundingClientRect(), k = s.width / 390;
+  const r = el.getBoundingClientRect();
+  return {left:(r.left - s.left) / k, top:(r.top - s.top) / k, width:r.width / k, height:r.height / k};
+}
+function tutPoint(el){
+  const ptr = $('coachPtr'), txt = $('coachTxt');
+  if (!el || !el.offsetParent){ ptr.style.display='none'; txt.style.display='none'; return; }
+  ptr.style.display=''; txt.style.display='';
+  const r = stageRectOf(el), cx = r.left + r.width/2;   // дизайн-координаты сцены
+  ptr.style.left = (cx - 22) + 'px';
+  ptr.style.top  = Math.max(8, r.top - 58) + 'px';
+  const tw = txt.offsetWidth || 200;
+  txt.style.left = Math.max(10, Math.min(cx - tw/2, 390 - tw - 10)) + 'px';
+  txt.style.top  = Math.max(8, r.top - 66 - (txt.offsetHeight || 40)) + 'px';
+}
+function tutEnd(){          // цель достигнута: короткая похвала и всё
+  S.tut.active = false; S.tut.step = null;
+  $('coach').classList.add('off');
+  toast(TUT.praiseToast);
+}
+function tutSkip(){         // «Пропустить» — молча убрать коуча и подсветку
+  S.tut.active = false; S.tut.step = null;
+  $('coach').classList.add('off');
+  if (S.side) paintCards();
+}
+
+/* ---- играбельные мини-игры (числа и тексты — CONFIG.minigames) ----
+   Капча — разовая награда; шифр (волна 21) — временный буст дохода вместо байтов.
+   Потолок выгоды воронку не шорткатит. */
+const MG = CONFIG.minigames;
+let mgRun = null;   // живая сессия: {kind, round, streak, zone, pos, raf, timer, over…}
+function mgStopTimers(){
+  if (!mgRun) return;
+  if (mgRun.raf) cancelAnimationFrame(mgRun.raf);
+  if (mgRun.timer) clearInterval(mgRun.timer);
+  mgRun.raf = mgRun.timer = null;
+}
+function mgOpen(kind){
+  mgStopTimers();
+  mgRun = {kind, round:1, streak:0, over:false};
+  const C = MG[kind], tx = C.texts[S.side];
+  const vars = kind === 'cipher' ? {min:C.minStreak, mins:C.boostMins}
+                                 : {good:C.goodCount, sec:C.timerSec, rounds:C.rounds};
+  $('mgview').innerHTML =
+    '<div class="mgbar"><b>' + tx.title + '</b><button class="x" onclick="mgClose()">✕</button></div>' +
+    '<div class="mgsub">' + tpl(tx.sub, vars) + '</div>' +
+    '<div class="mgstage" id="mgstage"></div>';
+  $('mgview').classList.add('on');
+  if (kind === 'cipher'){ if (cipherCdLeft() > 0) cipherCooldown(); else cipherRound(); }
+  else capRound();
+}
+function mgClose(){
+  mgStopTimers();
+  mgRun = null;
+  $('mgview').classList.remove('on');
+}
+/* победный экран капчи (разовая награда); у шифра свой финал — cipherGrant() */
+function mgWin(kind){
+  mgStopTimers();
+  mgRun.over = true;
+  const C = MG[kind], tx = C.texts[S.side];
+  const first = !S.mgWon[kind];
+  if (first){ S.mgWon[kind] = true; S.bytes += C.reward; paint(); }
+  $('mgstage').innerHTML =
+    '<div class="mgwin"><div class="big">' + art(MG.list.find(m=>m.game===kind).art) + '</div>' +
+    '<h3>' + C.winTitle + '</h3>' +
+    '<p>' + (first ? '+' + fmt(C.reward) + ' байтов' : MG.rewardOnceLine) + '</p>' +
+    '<button class="mgbtn" onclick="mgClose()">' + MG.winBack + '</button></div>';
+  if (first) toast(tpl(MG.winToast, {game:tx.title, n:fmt(C.reward)}));
+}
+
+/* «взлом шифра» (волна 21): серия попаданий без промаха — с каждым хитом зона уже
+   и метка быстрее. Серия ≥ minStreak → буст дохода ×(серия−1): забрать кнопкой или
+   играть до промаха (набранное не сгорает). Короткая серия не считается и играется сразу. */
+function cipherCdLeft(){ return Math.max(0, S.cipherCdUntil - Date.now()); }
+function cipherRound(){
+  const C = MG.cipher;
+  const zonePct = Math.max(C.zoneMinPct, C.zoneStartPct - C.zoneShrinkPct*mgRun.streak);
+  const zoneLeft = 8 + Math.random()*(84 - zonePct);   // не прижимать к краям
+  mgRun.zone = [zoneLeft, zoneLeft + zonePct];
+  mgRun.pos = 0;
+  $('mgstage').innerHTML =
+    '<div class="mground">' + tpl(C.roundLabel,{n:mgRun.streak}) + '</div>' +
+    '<div class="tbar"><div class="tzone" style="left:' + zoneLeft + '%;width:' + zonePct + '%"></div>' +
+    '<div class="tmark" id="tmark" style="left:0%"></div></div>' +
+    '<button class="mgbtn" onclick="cipherStop()">' + C.stopLabel + '</button>' +
+    (mgRun.streak >= C.minStreak
+      ? '<button class="mgbtn bank" onclick="cipherBank()">' + tpl(C.bankLabel,{mult:mgRun.streak-1}) + '</button>' : '');
+  mgRun.t0 = performance.now();
+  mgRun.sweepMs = C.sweepSec * Math.pow(C.speedUpFactor, mgRun.streak) * 1000;
+  const loop = now => {
+    if (!mgRun || mgRun.kind !== 'cipher' || mgRun.over) return;
+    const ph = ((now - mgRun.t0) / mgRun.sweepMs) % 2;
+    mgRun.pos = ph < 1 ? ph : 2 - ph;                   // 0..1 пинг-понг
+    const el = $('tmark'); if (el) el.style.left = (mgRun.pos*100) + '%';
+    mgRun.raf = requestAnimationFrame(loop);
+  };
+  mgRun.raf = requestAnimationFrame(loop);
+}
+function cipherStop(){
+  if (!mgRun || mgRun.kind !== 'cipher' || mgRun.over) return;
+  cancelAnimationFrame(mgRun.raf);
+  const C = MG.cipher, pct = (mgRun.pos || 0) * 100;
+  if (pct >= mgRun.zone[0] && pct <= mgRun.zone[1]){
+    mgRun.streak++;
+    cipherRound();                                    // серия живёт: дальше или «Забрать ×N»
+  } else if (mgRun.streak >= C.minStreak){
+    cipherGrant();                                    // промах, но серия набрана — буст не сгорает
+  } else {
+    toast(tpl(C.missToast,{min:C.minStreak}));
+    mgRun.streak = 0;                                 // не засчитано: без буста и без перезарядки
+    cipherRound();
+  }
+}
+function cipherBank(){
+  if (!mgRun || mgRun.kind !== 'cipher' || mgRun.over) return;
+  cancelAnimationFrame(mgRun.raf);
+  cipherGrant();
+}
+/* выдача буста: доход ×(серия−1) на boostMins минут + перезарядка игры на cooldownMins */
+function cipherGrant(){
+  mgStopTimers();
+  mgRun.over = true;
+  const C = MG.cipher, mult = mgRun.streak - 1;
+  S.boost = {mult, until: Date.now() + C.boostMins*60e3};
+  S.cipherCdUntil = Date.now() + C.cooldownMins*60e3;
+  $('mgstage').innerHTML =
+    '<div class="mgwin"><div class="big">' + art('game_cipher') + '</div>' +
+    '<h3>' + C.winTitle + '</h3>' +
+    '<p>' + tpl(C.winLine,{mult, mins:C.boostMins}) + '<br>' + tpl(C.winCdLine,{cd:C.cooldownMins}) + '</p>' +
+    '<button class="mgbtn" onclick="mgClose()">' + MG.winBack + '</button></div>';
+  toast(tpl(C.boostToast,{n:mgRun.streak, mult, mins:C.boostMins}));
+  paintCipherBadge();
+}
+/* экран перезарядки: открыли шифр во время кулдауна — играть нельзя, таймер тикает */
+function cipherCooldown(){
+  const C = MG.cipher;
+  mgRun.over = true;
+  $('mgstage').innerHTML =
+    '<div class="mgwin"><div class="big">' + art('game_cipher') + '</div>' +
+    '<h3>' + C.cdTitle + '</h3>' +
+    '<p>' + C.cdLine + ' <b id="cdleft">' + mmss(cipherCdLeft()) + '</b></p>' +
+    '<button class="mgbtn" onclick="mgClose()">' + MG.winBack + '</button></div>';
+  mgRun.timer = setInterval(()=>{
+    const el = $('cdleft'); if (el) el.textContent = mmss(cipherCdLeft());
+  }, 500);
+}
+/* бейдж плитки шифра на экране игр: «×N MM:SS» при бусте, «перезарядка MM:SS» при кулдауне */
+function paintCipherBadge(){
+  const el = $('cipherBadge'); if (!el) return;
+  const C = MG.cipher;
+  if (boostMult() > 1){
+    el.style.display = ''; el.classList.remove('cd');
+    el.textContent = tpl(C.badgeBoost,{mult:S.boost.mult, t:mmss(S.boost.until - Date.now())});
+  } else if (cipherCdLeft() > 0){
+    el.style.display = ''; el.classList.add('cd');
+    el.textContent = tpl(C.badgeCd,{t:mmss(cipherCdLeft())});
+  } else el.style.display = 'none';
+}
+
+/* «обход капчи»: cols×cols (волна 21: 6×6), найди все правильные плитки до конца
+   таймера; ошибка или таймаут — с первого раунда. Размер сетки — CONFIG, не хардкод. */
+function capRound(){
+  const C = MG.captcha, tx = C.texts[S.side];
+  const cellN = C.cols * C.cols;
+  const good = new Set();
+  while (good.size < C.goodCount) good.add(Math.floor(Math.random()*cellN));
+  mgRun.good = good; mgRun.found = 0;
+  let cells = '';
+  for (let i = 0; i < cellN; i++)
+    cells += '<div class="capcell" data-i="' + i + '" onclick="capTap(' + i + ')">' +
+      art(good.has(i) ? tx.goodArt : tx.badArt) + '</div>';
+  $('mgstage').innerHTML =
+    '<div class="mground">' + tpl(C.roundLabel,{n:mgRun.round, rounds:C.rounds}) + '</div>' +
+    '<div class="capgrid" style="grid-template-columns:repeat(' + C.cols + ',1fr)">' + cells + '</div>' +
+    '<div class="captimer"><i id="capbar" style="width:100%"></i></div>';
+  mgRun.t0 = Date.now();
+  mgRun.timer = setInterval(()=>{
+    if (!mgRun || mgRun.kind !== 'captcha') return;
+    const left = 1 - (Date.now() - mgRun.t0)/(C.timerSec*1000);
+    const bar = $('capbar'); if (bar) bar.style.width = Math.max(0, left*100) + '%';
+    if (left <= 0) capFail(C.failTimeToast);
+  }, 100);
+}
+function capTap(i){
+  if (!mgRun || mgRun.kind !== 'captcha' || mgRun.over || mgRun.failing) return;
+  const C = MG.captcha;
+  const cell = document.querySelector('.capcell[data-i="' + i + '"]');
+  if (mgRun.good.has(i)){
+    if (cell.classList.contains('hit')) return;
+    cell.classList.add('hit');
+    mgRun.found++;
+    if (mgRun.found >= C.goodCount){
+      clearInterval(mgRun.timer); mgRun.timer = null;
+      if (mgRun.round >= C.rounds){ mgWin('captcha'); return; }
+      mgRun.round++;
+      capRound();
+    }
+  } else {
+    cell.classList.add('boom');
+    capFail(C.failWrongToast);
+  }
+}
+function capFail(msg){
+  if (!mgRun || mgRun.failing) return;
+  clearInterval(mgRun.timer); mgRun.timer = null;
+  mgRun.failing = true;
+  toast(msg);
+  mgRun.round = 1;
+  setTimeout(()=>{
+    if (mgRun && mgRun.kind === 'captcha' && !mgRun.over){ mgRun.failing = false; capRound(); }
+  }, 450);
+}
+
+/* ---- навигация ---- */
+function go(v, btn){
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+  $(v).classList.add('on');
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on', b===btn));
+  if (v==='v-cards') paintCards();
+  if (v==='v-tasks') paintTasks();
+  if (v==='v-top') paintTop();
+  paint();
+  if (S.tut.active){
+    if (S.tut.step === 'nav' && v === 'v-cards') tutStep('buy');  // FTUE: дошёл до карт
+    else tutPaint();
+  }
+}
+function navTo(v){ go(v, document.querySelector('nav button[data-v="' + v + '"]')); }
+
+/* ---- выбор лагеря ---- */
+let selCamp = null;
+function pickCamp(s){
+  selCamp = s;
+  $('p_rkn').classList.toggle('sel', s==='rkn');   // .sel меняет рамку И персонажа на «выбранный» арт
+  $('p_vpn').classList.toggle('sel', s==='vpn');
+  const cs = $('campsel');                          // класс красит виньетку .csbg и кнопку CTA
+  cs.classList.remove('selvpn','selrkn');
+  cs.classList.add(s==='vpn' ? 'selvpn' : 'selrkn');
+  const b = $('campGo');
+  b.textContent = tpl(CONFIG.campSelect.continueLabel, {camp:CONFIG.camps[s].label});
+  b.classList.add('show');
+}
+function confirmCamp(){
+  if (!selCamp) return;
+  S.side = selCamp;
+  document.body.dataset.side = S.side;
+  $('campsel').style.display = 'none';
+  S.bytes += E.welcomeBonus;
+  toast(tpl(T.welcomeToast, {bonus:E.welcomeBonus, mult:E.campMult}));
+  paint(); paintCards(); paintEvPromo(); paintGamesPromo();
+  tutStart();   // FTUE: коуч стартует сразу после «Продолжить»
+  /* idle-событие (волна 10): таймер от начала геймплея */
+  if (CONFIG.idleEvent.enabled) setTimeout(maybeIdleEvent, CONFIG.idleEvent.delayMs);
+}
+
+/* ---- idle-событие (волна 10; починка волны 13): шит-оффер по 60с-таймеру.
+   БЫЛО: тап по имбе или один заход в стор глушили оффер НАВСЕГДА — на живом демо
+   попап «пропадал» (Павел, 21.08). СТАЛО: гасят оффер только конверсия (ВПН стоит /
+   в событие уже записан) или уже показанный шит; занятость воронкой прямо сейчас
+   (диалог/Safari/стор/онбординг/приложение/шторки) = перенос на retryMs, не отмена. */
+function maybeIdleEvent(){
+  if (S.eventShown || S.vpnInstalled || S.eventRegistered) return;
+  const busy = ['linkDlg','safari','store','onb','vapp','giftM','codeM','unlockM','eventOkM']
+    .some(id => $(id).classList.contains('on'));
+  if (busy){ setTimeout(maybeIdleEvent, CONFIG.idleEvent.retryMs); return; }
+  S.eventShown = true;                                           // один раз за сессию
+  /* столкновение с FTUE: событие ловит и застрявших В ОБУЧЕНИИ — таймер не паузим,
+     но коуч (палец+подсказка+скип) гасим начисто ДО показа шита, чтобы не было стопки */
+  if (S.tut.active) tutSkip();
+  showEventSheet();
+}
+/* шит события — общий для идл-таймера и промо-баннера штаба (волна 13) */
+function showEventSheet(){
+  const IE = CONFIG.idleEvent;
+  const m = $('eventM');
+  m.classList.add('bot');
+  m.innerHTML =
+    '<div class="bsheet eventpop"><div class="dragpill"></div>' +
+    '<button class="ex" onclick="closeM(\'eventM\')">' + art('xclose') + '</button>' +
+    '<div class="eart side-' + S.side + '">' + art(IE.arts[S.side]) + '</div>' +
+    '<div class="ee">' + IE.eyebrow + '</div>' +
+    '<div class="eh">' + IE.titles[S.side] + '</div>' +
+    '<div class="ehint">' + IE.hint + '</div>' +
+    '<button class="cta70 btnp" onclick="eventJoin()">' + IE.ctaLabel + '</button></div>';
+  m.onclick = e => { if (e.target === m) closeM('eventM'); };    // свайп/фон = закрыть
+  m.classList.add('on');
+}
+function eventJoin(){ closeM('eventM'); openStore('event'); }
+/* промо-баннер события на штабе (дизайн Миши, фрейм 2010): постоянный вход,
+   source='event' тем же путём. Арт — первым в DOM (тексты и кнопка поверх) */
+function paintEvPromo(){
+  if (!S.side) return;
+  const IE = CONFIG.idleEvent;
+  $('evPromo').innerHTML =
+    '<div class="epArt' + (S.side === 'rkn' ? ' cover' : '') + '">' +
+      art(IE.promo.bannerArts[S.side]) + '</div>' +
+    '<span class="epBadge">' + IE.promo.badge + '</span>' +
+    '<b class="epTitle">' + IE.titles[S.side] + '</b>' +
+    '<span class="epGo">' + art('evb_go') + '</span>';
+}
+/* баннер мини-игр на штабе (волна 20): статичные тексты из CONFIG.minigames.promo,
+   арт — реюз тайла «Взлом шифра». Тап = экран игр; в навигации подсвечен Штаб
+   (игры — под-экран штаба, назад ведёт кнопка ‹ в его шапке) */
+function paintGamesPromo(){
+  if (!S.side) return;
+  const GP = CONFIG.minigames.promo;
+  $('gamesPromo').innerHTML =
+    '<div class="epArt cover">' + art(GP.art) + '</div>' +
+    '<span class="epBadge">' + GP.badge + '</span>' +
+    '<b class="epTitle">' + GP.title + '</b>' +
+    '<span class="epGo">' + art('evb_go') + '</span>';
+}
+function gamesPromoTap(){
+  go('v-games', document.querySelector('nav button[data-v="v-tap"]'));
+}
+function evPromoTap(){
+  if (S.eventRegistered){ toast(CONFIG.eventSuccess.closeToast); return; }
+  S.eventShown = true;           // шит уже показан — идл-таймер не дублирует
+  if (S.tut.active) tutSkip();
+  showEventSheet();
+}
+function switchSide(s){
+  if (!S.side || S.side===s) return;
+  S.side = s; document.body.dataset.side = s;
+  toast(tpl(T.switchToast, {camp:CONFIG.camps[s].label}));
+  paint(); paintCards(); paintTop(); paintEvPromo(); paintGamesPromo();
+}
+
+/* ---- интро-онбординг игры (правка Саши 21.08): слайдер про суть игры до выбора стороны ---- */
+let introIdx = 0;
+function introPaint(){
+  document.querySelectorAll('#introDots i').forEach((d,i)=>d.classList.toggle('on', i===introIdx));
+  const IO = CONFIG.introOnboarding;   // на последнем слайде CTA меняется на «Выбрать сторону» (фрейм 5)
+  $('introNext').textContent = introIdx >= IO.slides.length - 1 ? IO.finalLabel : IO.nextLabel;
+}
+function openIntro(){
+  $('intro').classList.add('on');
+  introIdx = 0; $('islides').scrollLeft = 0; introPaint();
+}
+function introNext(){
+  const el = $('islides'), last = CONFIG.introOnboarding.slides.length - 1;
+  if (introIdx >= last){ introFinish(); return; }
+  el.scrollTo({left: el.clientWidth * (introIdx + 1), behavior:'smooth'});
+}
+function introFinish(){ $('intro').classList.remove('on'); }   // дальше — экран выбора стороны
+
+/* ---- переход игра → стор (волна 13: Figma 160:12487 + 148:8598) ----
+   openStore = системный «Открыть ссылку?» в игре → Открыть → Safari (страница
+   apps.apple.com, вопрос про App Store после «догрузки») → Открыть → фейк-стор.
+   Отмена на любом шаге возвращает в игру, воронка не «сгорает». */
+function openStore(from){
+  S.funnelSource = (from === 'event') ? 'event' : 'card';   // источник входа в воронку (волна 11)
+  $('toast').classList.remove('on');   // игровой тост поверх системного диалога не живёт
+  $('linkDlg').classList.add('on');
+}
+function linkDlgCancel(){ $('linkDlg').classList.remove('on'); }
+function linkDlgOpen(){
+  $('linkDlg').classList.remove('on');
+  $('safDim').classList.remove('show'); $('safDlg').classList.remove('show');
+  $('safari').classList.add('on');
+  clearTimeout(linkDlgOpen._t);   // вопрос Safari — после «догрузки» страницы
+  linkDlgOpen._t = setTimeout(()=>{
+    $('safDim').classList.add('show'); $('safDlg').classList.add('show');
+  }, CONFIG.safari.dialogDelayMs);
+}
+function safCancel(){   // «Отменить» в Safari = закрыть вкладку, вернуться в игру
+  clearTimeout(linkDlgOpen._t);
+  $('safari').classList.remove('on');
+  paint(); paintCards();
+}
+function safOpenStore(){   // «Открыть» = App Store наезжает app-switch-анимацией
+  S.storeVisited = true;   // стор реально открыт (чип кода в картах становится доступен)
+  $('store').classList.add('on');
+  $('store').querySelector('.scroll').scrollTop = 0;
+  paint();
+}
+function closeStore(){
+  $('store').classList.remove('on');
+  $('safari').classList.remove('on');
+  $('safDim').classList.remove('show'); $('safDlg').classList.remove('show');
+  paint(); paintCards();
+}
+let installing = false;
+function installApp(){
+  if (installing) return;
+  const b = $('getBtn'), ST = CONFIG.store;
+  if ($('getTxt').textContent === ST.openLabel){ openOnb(); return; }  // «Открыть» = запуск приложения
+  installing = true;
+  b.classList.add('installing');
+  $('getTxt').textContent = ST.installingLabel;
+  setTimeout(()=>{
+    $('getTxt').textContent = ST.openLabel;
+    b.classList.remove('installing');
+    installing = false;
+  }, 1400);
+}
+
+/* ---- онбординг (4 УТП; последний «Далее» открывает приложение ВПН) ---- */
+let onbIdx = 0;
+function onbDots(){
+  document.querySelectorAll('#onbDots i').forEach((d,i)=>d.classList.toggle('on', i===onbIdx));
+}
+function openOnb(){
+  $('onb').classList.add('on');
+  onbIdx = 0; $('slides').scrollLeft = 0; onbDots();
+}
+function onbNext(){
+  const el = $('slides'), last = CONFIG.onboarding.slides.length - 1;
+  if (onbIdx >= last){ openVpnApp(); return; }
+  el.scrollTo({left: el.clientWidth * (onbIdx + 1), behavior:'smooth'});
+}
+
+/* ---- приложение ВПН (Figma волна 8): вкл/выкл + шторка подарка после включения ---- */
+let vpnOn = false, giftTimer = null;
+function openVpnApp(){
+  vpnOn = false; paintVpnApp();
+  $('vapp').classList.add('on');
+}
+function paintVpnApp(){
+  const VA = CONFIG.vpnApp;
+  $('vapp').classList.toggle('conn', vpnOn);
+  $('vaStatus').textContent = vpnOn ? VA.onStatus : VA.offStatus;
+  $('vaHint').textContent = vpnOn ? VA.onHint : VA.offHint;
+  $('vaDl').textContent = vpnOn ? VA.onDl : VA.offSpeed;
+  $('vaUl').textContent = vpnOn ? VA.onUl : VA.offSpeed;
+}
+function powerTap(){
+  vpnOn = !vpnOn; paintVpnApp();
+  clearTimeout(giftTimer);
+  if (vpnOn) giftTimer = setTimeout(openGift, CONFIG.vpnApp.giftDelayMs);
+}
+function openGift(){
+  if (!vpnOn) return;
+  $('giftM').classList.add('on');
+}
+function copyPromo(){
+  try { navigator.clipboard && navigator.clipboard.writeText(CONFIG.app.promo); } catch(e){}
+  const b = $('copyBtn');
+  b.textContent = CONFIG.giftSheet.copiedLabel; b.classList.add('ok');
+}
+/* «Перейти и активировать» — возврат из приложения ВПН в игру app-switch-анимацией
+   (как в iOS: ВПН сжимается и уезжает, игра наезжает), затем шторка кода */
+function goToGame(){
+  closeM('giftM');
+  navTo('v-cards');
+  $('onb').classList.remove('on');   // подложки за приложением гасим сразу (их не видно)
+  $('store').classList.remove('on');
+  $('safari').classList.remove('on');
+  $('safDim').classList.remove('show'); $('safDlg').classList.remove('show');
+  paint(); paintCards();
+  document.body.classList.add('swin');
+  $('vapp').classList.add('away');
+  clearTimeout(goToGame._t);
+  goToGame._t = setTimeout(()=>{
+    $('vapp').classList.remove('on'); $('vapp').classList.remove('away');
+    document.body.classList.remove('swin');
+    openCode();
+  }, CONFIG.transitions.ms + 60);
+}
+
+/* ---- ввод кода (код УЖЕ подставлен — CONFIG.codeEntry.prefill, слово Павла) ---- */
+function openCode(){
+  $('codein').value = CONFIG.codeEntry.prefill ? CONFIG.app.promo : '';
+  $('codein').classList.remove('err');
+  $('codeerr').textContent = '';
+  $('codeM').classList.add('on');
+}
+function closeM(id){ $(id).classList.remove('on'); }
+function pasteCode(){
+  const fill = t => { $('codein').value = (t || CONFIG.app.promo).trim(); };
+  if (navigator.clipboard && navigator.clipboard.readText){
+    navigator.clipboard.readText()
+      .then(t=>fill(t && t.trim().toUpperCase()===CONFIG.app.promo ? t : CONFIG.app.promo))
+      .catch(()=>fill());
+  } else fill();
+}
+function submitCode(){
+  const v = $('codein').value.trim().toUpperCase().replace(/\s+/g,'');
+  if (v !== CONFIG.app.promo){
+    const inp = $('codein');
+    inp.classList.remove('err'); void inp.offsetWidth; inp.classList.add('err');
+    $('codeerr').textContent = CONFIG.codeEntry.errText;
+    return;
+  }
+  closeM('codeM');
+  unlockImba();
+}
+function unlockImba(){
+  /* ветка входа из события (волна 11): промокод тот же, награда другая — регистрация
+     в событии. Легендарка НЕ открывается, бонус НЕ начисляется; крючок имбы и чип кода
+     остаются живыми — за картой игрок может прийти позже обычным путём ('card') */
+  if (S.funnelSource === 'event'){ openEventOk(); return; }
+  S.vpnInstalled = true;
+  S.imbaLvl = 1;                 // разлок = уровень 1 лестницы
+  S.bytes += E.codeBonus;
+  const c = CONFIG.cards[S.side].find(x=>x.imba);
+  $('unlockArt').innerHTML = art(c.art);
+  $('unlockName').innerHTML = tpl(CONFIG.unlock.nameLine, {card:c.nm});
+  /* «х2» белый, «доход в час» приглушён — как на локнутой имбе (аудит-2 п.4) */
+  $('unlockPph').innerHTML = CONFIG.unlock.gainPph.replace(' ',' <span class="ph">') + '</span>';
+  $('unlockM').classList.add('on');
+  paint(); paintCards();
+}
+function closeUnlock(){
+  closeM('unlockM');
+  navTo('v-cards');
+  toast(CONFIG.unlock.closeToast);
+}
+
+/* ---- шит успеха для ветки события (волна 11): реюз стилей идл-события ---- */
+function openEventOk(){
+  S.eventRegistered = true;
+  const ES = CONFIG.eventSuccess, evName = CONFIG.idleEvent.titles[S.side];
+  const m = $('eventOkM');
+  m.classList.add('bot');
+  m.innerHTML =
+    '<div class="bsheet eventpop"><div class="dragpill"></div>' +
+    '<div class="eyebrow">' + ES.eyebrow + '</div>' +
+    '<div class="hline" style="text-align:center">' + ES.headline + '</div>' +
+    '<div class="eart side-' + S.side + '">' + art(CONFIG.idleEvent.arts[S.side]) + '</div>' +
+    '<div class="ee">' + ES.pill + '</div>' +
+    '<div class="eh">' + evName + '</div>' +
+    '<div class="ehint">' + tpl(ES.regLine, {team:CONFIG.camps[S.side].team, event:evName}) + '</div>' +
+    '<button class="cta70 btnp" style="margin-top:22px" onclick="closeEventOk()">' + ES.okLabel + '</button></div>';
+  m.classList.add('on');
+  paint(); paintCards();   // чип кода/крючок имбы остаются в силе — перерисовать честно
+}
+function closeEventOk(){
+  closeM('eventOkM');
+  navTo('v-tap');          // домой в штаб: событие живёт у «Битвы за сеть»
+  toast(CONFIG.eventSuccess.closeToast);
+}
+
+/* ---- тап ---- */
+function doTap(x, y){
+  if (!S.side || S.en < 1) return;
+  const boosted = S.tut.active && S.tut.step === 'tap';
+  /* FTUE-буст первых тапов × буст дохода от шифра (волна 21) */
+  const val = (boosted ? TAP_VAL * CONFIG.tutorial.tapBoost : TAP_VAL) * boostMult();
+  S.en -= 1; S.taps++; S.bytes += val;
+  const tz = $('tapzone');
+  $('tapArt').innerHTML = art('tap_' + S.side + '_hit');
+  clearTimeout(doTap._h);
+  doTap._h = setTimeout(()=>{ $('tapArt').innerHTML = art('tap_' + S.side); }, 120);
+  const f = document.createElement('div');
+  f.className = 'float'; f.textContent = '+' + val;
+  const r = tz.getBoundingClientRect(), k = stageScale();   // клик в вьюпорт-px → дизайн-px сцены
+  f.style.left = ((x - r.left) / k - 10) + 'px';
+  f.style.top = ((y - r.top) / k - 20) + 'px';
+  tz.appendChild(f);
+  setTimeout(()=>f.remove(), 1000);
+  if (boosted){
+    S.tut.taps++;
+    if (S.tut.taps >= CONFIG.tutorial.tapGoal) tutStep('nav'); else tutPaint();
+  }
+  paint();
+}
+
+/* ---- тики: энергия, пассивный доход, таймер битвы ---- */
+setInterval(()=>{
+  S.en = Math.min(E.energyMax, S.en + E.energyRegen);
+  S.bytes += pph()/3600 * boostMult();   // пассив тоже под бустом шифра (волна 21)
+  paintCipherBadge();                    // живой бейдж плитки: буст/перезарядка MM:SS
+  const left = Math.max(0, WAR_END - Date.now());
+  const d = Math.floor(left/864e5), h = Math.floor(left%864e5/36e5),
+        m = Math.floor(left%36e5/6e4), s = Math.floor(left%6e4/1e3);
+  const p = n => String(n).padStart(2,'0');
+  const ts = d + 'д ' + p(h) + ':' + p(m) + ':' + p(s);
+  $('warTimer').textContent = ts;
+  $('warTimer2').textContent = ts;   // дубль таймера в карточке «Битва за сеть» на главной
+  paint();
+}, 1000);
+
+/* ---- тосты ---- */
+function toast(s){
+  const t = $('toast');
+  t.textContent = s; t.classList.add('on');
+  clearTimeout(t._h);
+  t._h = setTimeout(()=>t.classList.remove('on'), 2000);
+}
+
+/* ---- старт ---- */
+buildStatic();
+/* интро-онбординг игры (правка Саши 21.08): показываем ДО выбора стороны */
+if (CONFIG.introOnboarding.enabled) openIntro();
+
+/* ---- прелоад артов (правка Павла 20.08): пока игрок на выборе стороны, фоном грузим
+   арты вперёд. Список собирается ИЗ ART автоматически (новые ключи Миши подхватятся сами):
+   сначала критичные первого экрана (тап-объекты, аватары, тумбы карт, имбы, постеры),
+   потом остальное каскадом по 4 картинки, чтобы не душить сеть разом. ---- */
+function preloadArt(){
+  const urls = k => [...String(ART[k]).matchAll(/src="([^"]+)"/g)].map(m => m[1]);
+  const prio = [], rest = [];
+  for (const k of Object.keys(ART))
+    (/^(tap_|avatar|card_|imba_|poster|combo|store_|onb)/.test(k) ? prio : rest).push(...urls(k));
+  const q = [...new Set([...prio, ...rest])];
+  let i = 0, inFlight = 0;
+  const pump = ()=>{
+    while (inFlight < 4 && i < q.length){
+      const im = new Image(); inFlight++;
+      im.onload = im.onerror = ()=>{ inFlight--; pump(); };
+      im.src = q[i++];
+    }
+  };
+  pump();
+  window.__preloadQueued = q.length;   // маркер для смоука
+}
+preloadArt();
+const tz = $('tapzone');
+tz.addEventListener('touchstart', e=>{
+  e.preventDefault();
+  for (const t of e.changedTouches) doTap(t.clientX, t.clientY);
+}, {passive:false});
+tz.addEventListener('mousedown', e=>doTap(e.clientX, e.clientY));
+window.addEventListener('resize', ()=>{ if (S.tut.active) tutPaint(); });
+paintTasks();
+paint();
+</script>
+</body>
+</html>
